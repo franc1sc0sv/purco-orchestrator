@@ -9,6 +9,47 @@ project you point it at.
 
 ---
 
+## Getting started — hand this to your AI
+
+Clone this repository, open a Claude Code session anywhere, and paste the block below. It performs
+the whole installation and stops when `/test-forge` is ready to use.
+
+> Set up Test Forge on this machine. Work through these steps in order and stop at the first one
+> that fails, telling me exactly what failed.
+>
+> 1. Confirm `node --version` is 22 or newer. The server runs TypeScript directly through Node's
+>    native type stripping, so there is no build step. If it is older, stop and tell me.
+> 2. Confirm Docker Desktop is running with `docker ps`. If it is not, stop and tell me.
+> 3. Move this clone to `~/.claude/testing` if it is not already there, then run `npm install`
+>    in it.
+> 4. Copy each of `skills/test-forge`, `skills/test-rules`, `skills/test-replay` and
+>    `skills/test-status` into `~/.claude/skills/`.
+> 5. Register the MCP server at user scope:
+>    `claude mcp add-json test-forge '{"command":"node","args":["'"$HOME"'/.claude/testing/packages/mcp/src/server.ts"]}' --scope user`
+> 6. Verify with `claude mcp list` that `test-forge` is connected. If it is not, stop and tell me.
+> 7. Add Docker Desktop's binary directory to my shell `PATH` if it is missing —
+>    `/Applications/Docker.app/Contents/Resources/bin` on macOS. Without it the credential helper
+>    cannot be resolved and every mutation campaign fails to boot. Do not skip this.
+> 8. Tell me to restart my Claude Code session, because the MCP server only loads its code when the
+>    process starts.
+>
+> After I restart, in a session opened inside the repository I want to test:
+>
+> 9. Read `~/.claude/testing/codex-exports/purco-web-backend.codex.json` and import it with the
+>    `codex_import` tool, passing the file's contents as the payload and my repository path as
+>    `cwd`.
+> 10. Confirm the tool list contains `mutation_campaign_start`, `mutation_batch_run` and
+>     `board_outcome_record_batch`, then run `/test-status` and show me the board.
+
+Full detail, and what to do when something goes wrong, is in [SETUP.md](SETUP.md).
+
+**Three things to know before your first run.** Imported rules arrive as _advisory_, never blocking —
+read them and promote the ones you agree with. **Restart your session after every `git pull`**, because
+a running server keeps the code it loaded and the failure is silent. And run **one mutation campaign at
+a time**: six workers is six Vitest processes plus a container set.
+
+---
+
 ## The four commands
 
 There are four commands and no others.
