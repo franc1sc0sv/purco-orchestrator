@@ -63,9 +63,14 @@ ask it to run `codex_import` with the contents of:
 ~/.claude/testing/codex-exports/purco-web-backend.codex.json
 ```
 
-The PurCo rules import at their real severities (23 blocking, 3 advisory) when you pass `markAdvisory: false`, because they are the standards this team already agreed. For someone else's doctrine in a different project, omit that flag so rules arrive advisory — read
-them, and promote the ones you agree with. A rule you have not read should not
-be able to fail your gates.
+Pass **`markAdvisory: false`**. The PurCo rules then arrive at the severities the
+team already agreed — **23 blocking and 3 advisory** — because they are this
+team's standards, not a suggestion. Confirm those two counts after importing.
+
+The opposite case is importing someone else's doctrine into a project that has
+not adopted it. There, omit the flag: every rule arrives advisory, and you
+promote the ones you agree with after reading them. A rule nobody on the project
+has read should not be able to fail its gates.
 
 The project is identified by the normalised git remote URL, so importing once
 covers every worktree of that repository you have now or create later.
