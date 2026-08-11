@@ -36,15 +36,19 @@ the whole installation and stops when `/test-forge` is ready to use.
 > After I restart, in a session opened inside the repository I want to test:
 >
 > 9. Read `~/.claude/testing/codex-exports/purco-web-backend.codex.json` and import it with the
->    `codex_import` tool, passing the file's contents as the payload and my repository path as
->    `cwd`.
+>    `codex_import` tool, passing the file's contents as the payload, my repository path as `cwd`,
+>    and **`markAdvisory: false`** so the rules keep the severities the team already agreed —
+>    23 blocking and 3 advisory. Then confirm those counts came through.
 > 10. Confirm the tool list contains `mutation_campaign_start`, `mutation_batch_run` and
 >     `board_outcome_record_batch`, then run `/test-status` and show me the board.
 
 Full detail, and what to do when something goes wrong, is in [SETUP.md](SETUP.md).
 
-**Three things to know before your first run.** Imported rules arrive as _advisory_, never blocking —
-read them and promote the ones you agree with. **Restart your session after every `git pull`**, because
+**Three things to know before your first run.** The PurCo rules import at their real severities —
+23 blocking, 3 advisory — because they are the standards this team already agreed, not a suggestion.
+Importing someone else's doctrine into a different project is the opposite case: drop
+`markAdvisory: false` there, so rules arrive advisory until you have read them.
+**Restart your session after every `git pull`**, because
 a running server keeps the code it loaded and the failure is silent. And run **one mutation campaign at
 a time**: six workers is six Vitest processes plus a container set.
 

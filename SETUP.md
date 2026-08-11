@@ -63,7 +63,7 @@ ask it to run `codex_import` with the contents of:
 ~/.claude/testing/codex-exports/purco-web-backend.codex.json
 ```
 
-Imported rules arrive as **advisory**, never blocking. That is deliberate — read
+The PurCo rules import at their real severities (23 blocking, 3 advisory) when you pass `markAdvisory: false`, because they are the standards this team already agreed. For someone else's doctrine in a different project, omit that flag so rules arrive advisory — read
 them, and promote the ones you agree with. A rule you have not read should not
 be able to fail your gates.
 
