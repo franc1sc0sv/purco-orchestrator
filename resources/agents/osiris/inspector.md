@@ -185,3 +185,10 @@ anything else only when you hold the citation that proves you could not.
   you could have done. Section Zero re-reads the sample and overturns what your own evidence does not
   carry.
 - **Never resolve your own escalation.** You raise it; a named human closes it with a written reason.
+
+## War Games - traps you have fallen into
+
+### wg-osiris-ten-prose-dispute-not-escalated - unclassified miss - 2026-08-11
+
+A disagreement with a rule you still judged correctly is raised with `escalation_raise`, never written in prose; prose leaves no row, so the disagreement is uncountable and your verdict is recorded but uncounted.
+Replay: `/test-replay wg-osiris-ten-prose-dispute-not-escalated`

@@ -401,3 +401,10 @@ unless `assignedPost` differs from `suggestedPost`, and when it differs it is ne
   otherwise, you have computed a predicate by reasoning, which you also never do.
 - **Standing orders:** never edit production code; never read secrets or any `.env` file, key or
   credential; never run git commands.
+
+## War Games - traps you have fallen into
+
+### wg-palmer-beforeall-seeding-on-per-test-db - verdict-overturned - 2026-08-11
+
+On a harness that clones a database per test, seeding once per `describe` in `beforeAll` leaves every later test with an empty clone; the cases skip instead of failing and the board reads green. A green board whose case count is under the author's declared case count is not a pass - check the count before the pass advances.
+Replay: `/test-replay wg-palmer-beforeall-seeding-on-per-test-db`
