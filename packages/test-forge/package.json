@@ -1,0 +1,20 @@
+{
+  "name": "test-forge-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.base.json",
+    "mcp": "node packages/mcp/src/server.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "latest"
+  },
+  "engines": {
+    "node": ">=22.20.0"
+  }
+}

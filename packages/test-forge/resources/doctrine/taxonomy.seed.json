@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "name": "test-forge-aspect-taxonomy-seed",
+  "purpose": "Seed aspects for a doctrine session. Gray Team clusters the corpus into these buckets first, then may propose new aspects or retire unused ones. Rules always hang off exactly one aspect.",
+  "blockingBars": {
+    "low": {
+      "label": "low",
+      "meaning": "A single credible corpus example plus a human confirmation is enough to accept a rule in this aspect. Silence in the corpus is not evidence of absence.",
+      "reason": "These aspects guard behaviour whose failure mode is a production incident, a data leak, or a wrong money amount. A missing rule costs far more than an over-strict one, and an over-strict rule is cheap to relax later."
+    },
+    "majority": {
+      "label": "majority",
+      "meaning": "The pattern must hold in most of the files where the aspect applies, and the counter-examples must be explainable, before a rule is accepted.",
+      "reason": "These aspects shape how a test is built rather than whether it is safe. A pattern that only half the corpus follows is a preference under negotiation, not doctrine, and the human decides which way it settles."
+    },
+    "near-total": {
+      "label": "near-total",
+      "meaning": "The pattern must hold in nearly every applicable file, with named and understood exceptions, before a rule is accepted. Otherwise the aspect ships with no rule at all.",
+      "reason": "These aspects are style. If the bar is loose the system invents house rules nobody agreed to, floods reviews with cosmetic findings, and burns the human's trust on noise. An empty aspect is the correct outcome when the corpus is not consistent."
+    }
+  },
+  "aspects": [
+    {
+      "id": "isolation",
+      "scope": "backend",
+      "title": "Test isolation",
+      "appliesWhen": "The test file creates or reads persistent state (database rows, queues, caches, files) that another test in the suite could also create or read.",
+      "blockingBar": "majority",
+      "governs": "How a test carves out state that belongs only to it, and how it selects that state back. Covers the choice of the isolating key (a dedicated client, organisation, tenant, or run-scoped identifier), and the ban on selecting by properties that unrelated seed data can also match. Also covers cleanup, transaction boundaries, and whether tests may run in parallel or shuffled order.",
+      "rationale": "Isolation style varies with the seam a suite uses, so a repository can legitimately hold two or three patterns at once. Requiring a majority forces the dominant pattern to be named while leaving room for the documented alternative."
+    },
+    {
+      "id": "authorization",
+      "scope": "backend",
+      "title": "Authorization and access control",
+      "appliesWhen": "The code under test reads or changes data that any role, tenant, or organisation is not allowed to see or change, or the entry point takes an actor or session.",
+      "blockingBar": "low",
+      "governs": "Which actors a test must exercise, and what a denied actor must observe. Covers positive and negative role coverage, the difference between a hard denial and a filtered-empty result, row-level security paths, ownership checks, and guest or involved-party roles. Also covers proving that a denial is enforced by the system under test and not by the test's own setup.",
+      "rationale": "An authorization hole is an incident and often a disclosure. One clear example in the corpus is enough to make the rule; waiting for a majority means shipping the gap."
+    },
+    {
+      "id": "time-and-dates",
+      "scope": "backend",
+      "title": "Time and dates",
+      "appliesWhen": "The code under test reads the clock, compares dates, buckets by period, computes an age or a due date, or persists a date-only column.",
+      "blockingBar": "low",
+      "governs": "How a test controls the clock and how it builds date inputs. Covers fake or frozen time versus wall-clock reliance, time zone and offset handling, date-only versus timestamp columns, boundary instants at period edges, and month-length or daylight-saving edges. Also covers expected values being computed by hand rather than by re-running the production date maths.",
+      "rationale": "Date defects are silent, appear only at a boundary or in another time zone, and reach money and deadlines. The cost of a missing rule here is an incident, so a single corpus example plus human confirmation is enough."
+    },
+    {
+      "id": "assertions",
+      "scope": "backend",
+      "title": "Assertion shape",
+      "appliesWhen": "The test file contains at least one assertion.",
+      "blockingBar": "near-total",
+      "governs": "What a test asserts and how tightly. Covers whole-object versus field-by-field assertions, exhaustive versus partial matching, ordering guarantees on collections, snapshot use, and the rule that an expected value is hand-computed from the setup rather than derived from the result under test. Also covers how many assertions a single test may carry.",
+      "rationale": "Assertion shape is taste as much as safety, and a repository in transition holds several shapes at once. Without near-total evidence the system would manufacture a house style and rewrite passing tests for no behavioural gain."
+    },
+    {
+      "id": "harness-externals",
+      "scope": "backend",
+      "title": "Harness and external boundaries",
+      "appliesWhen": "The code under test reaches any process boundary: HTTP, a payment or mail provider, object storage, a queue, or another service.",
+      "blockingBar": "near-total",
+      "governs": "Where the test double is placed and which harness supplies it. Covers the ban or allowance on mocking internal collaborators, the sanctioned interception layer for outbound calls, use of local containers or emulators versus in-process fakes, and the shared setup utilities a test is expected to reuse instead of hand-rolling. Also covers recording and asserting outbound calls.",
+      "rationale": "Harness choice is repository-specific plumbing that shifts as infrastructure changes. A rule built on thin evidence would fight an in-flight migration and forbid the newer harness the team is actually moving to."
+    },
+    {
+      "id": "tenancy",
+      "scope": "backend",
+      "title": "Tenancy and organisation scoping",
+      "appliesWhen": "The repository serves more than one tenant or partitions data by organisation, and the code under test resolves a tenant or filters by an organisation identifier.",
+      "blockingBar": "majority",
+      "governs": "How a test pins the tenant it runs as, and how it proves scoping holds. Covers tenant resolution from configuration or context, branches whose behaviour differs per tenant, cross-organisation leakage checks inside one tenant, and the ban on hard-coded tenant names in place of the sanctioned predicate helpers.",
+      "rationale": "Tenancy conventions are established and visible across the corpus, so a majority is reachable. The residual leakage risk is usually caught by the authorization aspect, which carries the lower bar."
+    },
+    {
+      "id": "feature-flags",
+      "scope": "backend",
+      "title": "Feature flags",
+      "appliesWhen": "The code under test reads a feature flag, or sits behind a call site that reads one.",
+      "blockingBar": "low",
+      "governs": "Which flag states a test must cover and how it sets them. Covers pinning each flag explicitly rather than inheriting a harness default, exercising both the on and off paths for a flag that is not yet fully rolled out, keying flags through the shared constant instead of a string literal, and restoring flag state between tests.",
+      "rationale": "A harness that defaults every flag to on hides the exact path that production runs today. That failure ships green and breaks on release, so one example is enough to make the rule."
+    },
+    {
+      "id": "data-setup",
+      "scope": "backend",
+      "title": "Data setup",
+      "appliesWhen": "The test file creates domain records before exercising the code under test.",
+      "blockingBar": "majority",
+      "governs": "How a test builds its fixtures. Covers factory or builder use versus direct writes through the data client or raw SQL, the placement of setup in shared hooks versus inside the test body, how much irrelevant data a test seeds, and whether soft-deletes and other state transitions go through the production path rather than being forged.",
+      "rationale": "Repositories usually hold a dominant factory layer plus legacy direct writes that nobody has migrated. A majority names the dominant path without condemning every older file on sight."
+    },
+    {
+      "id": "naming-structure",
+      "scope": "backend",
+      "title": "Naming and file structure",
+      "appliesWhen": "Always, for any test file in backend scope.",
+      "blockingBar": "near-total",
+      "governs": "Where a test file lives, what it is called, and how its blocks read. Covers directory placement relative to the code under test, file suffix, the grammar of describe and test titles, nesting depth, and one-test-file-per-unit-of-behaviour conventions.",
+      "rationale": "Naming is pure convention with zero behavioural consequence. A rule invented from a weak pattern generates constant cosmetic findings and teaches the human to ignore the reviewer, which is worse than having no rule."
+    },
+    {
+      "id": "async-events",
+      "scope": "backend",
+      "title": "Asynchronous work and events",
+      "appliesWhen": "The code under test publishes a domain event, enqueues a job, sends a notification or email, or schedules deferred work.",
+      "blockingBar": "low",
+      "governs": "How a test drives work that finishes after the call returns. Covers draining or awaiting the bus or queue before asserting, asserting the real downstream effect rather than spying on the publisher, preventing undrained events from leaking into the next test, and covering handler failure and retry paths.",
+      "rationale": "Undrained async work produces both false greens and cross-test flakes, and the missed effect is often a customer-visible notification or a money movement. Waiting for a majority here means shipping known holes."
+    },
+    {
+      "id": "querying",
+      "scope": "frontend",
+      "title": "Element querying",
+      "appliesWhen": "The test file renders a component or page and looks elements up from the result.",
+      "blockingBar": "near-total",
+      "governs": "How a test finds the thing it acts on or asserts about. Covers the preferred query priority (role and accessible name, label, text, then test identifiers), the ban on structural selectors such as class names or DOM traversal, when a test identifier is legitimate, and the choice between get, query, and find variants.",
+      "rationale": "Query style is the most-copied habit in a frontend suite and the one most likely to be mid-migration. Below near-total evidence the system would enforce the newer library's ideal over the repository's actual practice."
+    },
+    {
+      "id": "interaction",
+      "scope": "frontend",
+      "title": "User interaction",
+      "appliesWhen": "The test file simulates any user action: click, type, keyboard, hover, drag, upload, or submit.",
+      "blockingBar": "low",
+      "governs": "How an action is dispatched and what a test may assume about it. Covers the user-event layer versus raw synthetic events, awaiting interactions, realistic sequences such as focus before typing, keyboard reachability of an action, and asserting the observable result of the interaction rather than an internal handler call.",
+      "rationale": "An interaction faked at the wrong layer passes while the real control is unreachable, disabled, or never fires. The user sees a dead button, so one corpus example is enough to make the rule."
+    },
+    {
+      "id": "network-boundary",
+      "scope": "frontend",
+      "title": "Network boundary",
+      "appliesWhen": "The component or page under test issues a request, or reads from a client that issues one.",
+      "blockingBar": "near-total",
+      "governs": "Where the frontend test cuts the network. Covers request interception at the wire versus stubbing the client hook or module, the sanctioned mock server and handler helpers, per-test overrides of a default handler, and asserting the request payload that was actually sent.",
+      "rationale": "This boundary is tooling-specific and frequently mid-migration between a hook stub and a wire-level server. Only near-total evidence proves which layer the repository has actually settled on."
+    },
+    {
+      "id": "async-and-states",
+      "scope": "frontend",
+      "title": "Async and view states",
+      "appliesWhen": "The component or page under test can render more than one state over time: loading, empty, error, partial, or populated.",
+      "blockingBar": "low",
+      "governs": "How a test waits and which states it must cover. Covers awaiting a settled assertion instead of a fixed timer, the required coverage of loading, empty, and error branches alongside the happy path, avoiding act warnings and unhandled rejections, and asserting that a transient state actually disappears.",
+      "rationale": "An untested error or empty branch is the branch that ships broken, and a timer-based wait is a flake that erodes trust in every other verdict. Both are incident-grade, so the bar is low."
+    },
+    {
+      "id": "forms-validation",
+      "scope": "frontend",
+      "title": "Forms and validation",
+      "appliesWhen": "The component or page under test renders an input, a select, or a submit control.",
+      "blockingBar": "low",
+      "governs": "What a form test must prove. Covers invalid-input coverage and the visible message a user gets, submit disabling and double-submit protection, the exact payload sent on a valid submit, default and pre-filled values, reset behaviour, and field-level versus form-level errors.",
+      "rationale": "Forms are where wrong data enters the system and where a missing validation becomes a bad record or a wrong payment. The blast radius justifies accepting a rule from a single example."
+    },
+    {
+      "id": "permissions-ui",
+      "scope": "frontend",
+      "title": "Permission-driven UI",
+      "appliesWhen": "The component or page under test branches on a role, a permission, or an ownership check when deciding what to render or enable.",
+      "blockingBar": "low",
+      "governs": "How a test covers what each actor may see and do. Covers rendering per role rather than for one default user, the distinction between hidden, visible-but-disabled, and read-only, asserting the absence of a forbidden control, and checking permission through the sanctioned predicate helpers rather than comparing role strings.",
+      "rationale": "A control shown to the wrong role is a visible trust failure and often the front half of a real authorization hole. One example is enough to justify the rule."
+    },
+    {
+      "id": "feature-flags",
+      "scope": "frontend",
+      "title": "Feature flags in the UI",
+      "appliesWhen": "The component or page under test reads a feature flag, directly or through a hook or provider.",
+      "blockingBar": "low",
+      "governs": "How the flag environment is pinned for a render. Covers setting each read flag explicitly instead of trusting a permissive harness default, covering both the on and off render, keying flags through the shared constant, and using the per-flag hook so a stale flag name fails type checking.",
+      "rationale": "Frontend harnesses commonly default all flags to on, so the off path, which is what most users currently see, goes untested and ships broken. That is incident-grade, so the bar is low."
+    },
+    {
+      "id": "tenancy-branding",
+      "scope": "frontend",
+      "title": "Tenancy and branding",
+      "appliesWhen": "The component or page under test renders tenant-specific copy, logos, theme values, or gates a feature by tenant.",
+      "blockingBar": "majority",
+      "governs": "How a test pins the tenant for a render and what it asserts about the difference. Covers setting the tenant through the sanctioned configuration seam rather than a literal, covering each tenant whose output differs, and asserting on visible copy or a semantic marker rather than on asset paths and colour values.",
+      "rationale": "Tenant branding is well-established convention with visible variation across the corpus, so a majority is reachable, and a wrong verdict is cosmetic rather than an incident."
+    },
+    {
+      "id": "accessibility",
+      "scope": "frontend",
+      "title": "Accessibility",
+      "appliesWhen": "The component or page under test renders interactive controls, a dialog, or a data table.",
+      "blockingBar": "majority",
+      "governs": "What accessibility properties a test is expected to hold. Covers accessible names on controls, label and control association, focus management for dialogs and drawers, live-region announcements for async results, and keyboard operability of anything reachable by mouse.",
+      "rationale": "Accessibility expectations vary sharply by component type and by how far a repository has taken them. A majority captures the settled practice without inventing an audit standard the team never adopted."
+    },
+    {
+      "id": "naming-structure",
+      "scope": "frontend",
+      "title": "Naming and file structure",
+      "appliesWhen": "Always, for any test file in frontend scope.",
+      "blockingBar": "near-total",
+      "governs": "Where a frontend test file lives, what it is called, and how its blocks read. Covers colocation next to the component versus a mirrored test tree, file suffix, describe and test title grammar stated as user-observable behaviour, and how render setup is factored into a shared helper.",
+      "rationale": "Naming has no behavioural consequence, so a rule invented from a weak pattern produces only cosmetic noise. If the corpus is not near-uniform, this aspect ships empty."
+    }
+  ]
+}

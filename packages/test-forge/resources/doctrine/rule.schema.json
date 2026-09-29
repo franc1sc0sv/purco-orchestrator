@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://test-forge.local/doctrine/rule.schema.json",
+  "title": "Test Forge doctrine rule",
+  "description": "A rule is a detection procedure, not a sentence. Every field that a human reads has a machine counterpart that Roland can execute.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "aspect",
+    "scope",
+    "severity",
+    "statement",
+    "rationale",
+    "archaeology",
+    "appliesWhen",
+    "detect",
+    "violates",
+    "rubric",
+    "verdictSpace",
+    "mechanization",
+    "fixtures",
+    "evidence",
+    "decidedBy"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "minLength": 3,
+      "maxLength": 80
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "aspect": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "scope": {
+      "enum": ["backend", "frontend"]
+    },
+    "severity": {
+      "enum": ["blocking", "advisory"]
+    },
+    "mechanization": {
+      "enum": ["full", "partial", "judgment"]
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 10
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 10
+    },
+    "archaeology": {
+      "type": "string",
+      "description": "Where the rule was found in the corpus and what history justifies it.",
+      "minLength": 1
+    },
+    "appliesWhen": { "$ref": "#/$defs/procedure" },
+    "detect": { "$ref": "#/$defs/procedure" },
+    "violates": { "$ref": "#/$defs/procedure" },
+    "rubric": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rubricItem" }
+    },
+    "verdictSpace": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": { "enum": ["pass", "violation", "not-applicable"] }
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fixture" }
+    },
+    "acceptance": { "$ref": "#/$defs/acceptance" },
+    "evidence": { "$ref": "#/$defs/evidence" },
+    "decidedBy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retired": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "reason"],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["human", "check"],
+      "properties": {
+        "human": {
+          "type": "string",
+          "description": "The procedure an inspector follows by hand.",
+          "minLength": 10
+        },
+        "check": { "$ref": "#/$defs/check" }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["grep", "ast-grep", "script", "sql", "none"]
+        },
+        "pattern": { "type": "string" },
+        "language": { "type": "string" },
+        "include": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "script": {
+          "type": "string",
+          "description": "Path relative to the Test Forge install root."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "expect": {
+          "enum": ["match", "no-match", "exit-zero", "exit-nonzero"]
+        },
+        "note": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "grep" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["pattern", "expect"] }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "ast-grep" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["pattern", "expect"] }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "script" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["script", "expect"] }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "sql" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["pattern", "expect"] }
+        }
+      ]
+    },
+    "rubricItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "expects"],
+      "properties": {
+        "id": { "type": "string" },
+        "question": { "type": "string", "minLength": 5 },
+        "expects": {
+          "type": "string",
+          "description": "The evidence an inspector must cite to answer yes.",
+          "minLength": 5
+        },
+        "weight": { "type": "number", "minimum": 0 }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "label", "why", "labelledBy"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "type": "string" },
+        "label": { "enum": ["follows", "violates", "not-applicable"] },
+        "isNearMiss": { "type": "boolean", "default": false },
+        "why": { "type": "string", "minLength": 5 },
+        "labelledBy": { "type": "string", "minLength": 1 }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixtures", "nearMisses", "reviewerScore", "acceptedAt"],
+      "properties": {
+        "fixtures": { "type": "integer", "minimum": 0 },
+        "nearMisses": { "type": "integer", "minimum": 0 },
+        "reviewerScore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["passed", "total"],
+          "properties": {
+            "passed": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "acceptedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["follows", "violates", "corpus"],
+      "properties": {
+        "follows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/citation" }
+        },
+        "violates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/citation" }
+        },
+        "corpus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scanned", "followed", "violated"],
+          "properties": {
+            "scanned": { "type": "integer", "minimum": 0 },
+            "followed": { "type": "integer", "minimum": 0 },
+            "violated": { "type": "integer", "minimum": 0 },
+            "notApplicable": { "type": "integer", "minimum": 0 },
+            "sampledAt": { "type": "string", "format": "date-time" }
+          }
+        }
+      }
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "excerpt": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

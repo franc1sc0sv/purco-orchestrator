@@ -1,0 +1,21 @@
+{
+  "name": "test-forge-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tool-names": "./src/tool-names.ts",
+    "./project": "./src/project.ts",
+    "./analysis": "./src/analysis.ts",
+    "./execution": "./src/execution.ts",
+    "./codex": "./src/codex.ts",
+    "./gates": "./src/gates.ts",
+    "./board": "./src/board.ts",
+    "./closure": "./src/closure.ts",
+    "./outcome": "./src/outcome.ts",
+    "./escalation": "./src/escalation.ts",
+    "./mutation": "./src/mutation.ts",
+    "./campaign": "./src/campaign.ts",
+    "./listing": "./src/listing.ts"
+  }
+}
