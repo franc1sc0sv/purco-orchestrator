@@ -1,0 +1,29 @@
+{
+  "name": "involved-party",
+  "ticket": "PURCO-3252",
+  "flag": "ENABLE_NEW_INVOLVED_PARTY_EXPERIENCE|enable_new_involved_party_experience",
+  "flagLabel": "the new involved party experience flag",
+  "legacy": "billingAccount|billingAccountId|senderAccountId|recipientAccountId|BillingAccount|billing_accounts",
+  "legacyLabel": "a billing account",
+  "target": "senderInvolvedPartyId|recipientInvolvedPartyId|involvedPartyId|involved_party_id|involvedParty\\.id|InvolvedParty\\.id|ForInvolvedParty",
+  "targetLabel": "an involved party id",
+  "indirection": "AccountOwnerTypeEnum\\.INVOLVED_PARTY",
+  "indirectionLabel": "a billing account resolved by INVOLVED_PARTY owner type",
+  "skip": "/node_modules/|src/types/feature-flags\\.ts$|prisma/migrations/.*\\.sql$",
+  "scanRoots": [
+    "src",
+    "prisma",
+    "db",
+    "tests",
+    "e2e"
+  ],
+  "maxClusterRows": 25,
+  "indirectHops": 4,
+  "indirectRoot": "src",
+  "extensions": [
+    ".ts",
+    ".tsx",
+    ".sql",
+    ".prisma"
+  ]
+}

@@ -1,0 +1,230 @@
+import type {
+  HookCallbackMatcher,
+  HookEvent,
+  HookInput,
+  HookJSONOutput,
+} from "@anthropic-ai/claude-agent-sdk";
+import type { EscalationRegistry } from "./escalation.ts";
+import type { Scratchpad } from "./scratchpad.ts";
+import type { SubagentTracker } from "./tracker.ts";
+
+const PROCEED: HookJSONOutput = {};
+
+const WRITE_STATEMENTS = [
+  "insert",
+  "update",
+  "delete",
+  "drop",
+  "truncate",
+  "alter",
+  "create",
+  "grant",
+  "revoke",
+  "comment",
+  "copy",
+  "call",
+  "do",
+  "vacuum",
+  "reindex",
+  "refresh",
+  "set",
+  "begin",
+  "commit",
+];
+
+const deny = (reason: string): HookJSONOutput => ({
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse",
+    permissionDecision: "deny",
+    permissionDecisionReason: reason,
+  },
+});
+
+export const isReadOnlySql = (sql: string): boolean => {
+  const stripped = sql
+    .split("\n")
+    .map((line) => line.split("--")[0])
+    .join(" ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .trim()
+    .toLowerCase();
+  if (stripped.length === 0) return false;
+  const first = stripped.split(/[\s(]+/)[0];
+  if (WRITE_STATEMENTS.includes(first)) return false;
+  if (
+    !["select", "explain", "with", "show", "table", "values"].includes(first)
+  ) {
+    return false;
+  }
+  for (const statement of WRITE_STATEMENTS) {
+    const pattern = new RegExp(`(^|[\\s;(])${statement}[\\s(]`, "i");
+    if (statement === "set" || statement === "create") continue;
+    if (pattern.test(stripped)) return false;
+  }
+  return true;
+};
+
+const describeInput = (input: Record<string, unknown>): string => {
+  const interesting = [
+    "command",
+    "file_path",
+    "pattern",
+    "path",
+    "prompt",
+    "description",
+    "subagent_type",
+    "url",
+  ];
+  for (const key of interesting) {
+    const value = input?.[key];
+    if (typeof value === "string" && value.length > 0) {
+      return `${key}=${value.replace(/\s+/g, " ").slice(0, 140)}`;
+    }
+  }
+  return "";
+};
+
+const WRITING_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
+
+export const buildHooks = (deps: {
+  scratchpad: Scratchpad;
+  tracker: SubagentTracker;
+  escalations: EscalationRegistry;
+  recordFileWritten: (file: string) => void;
+}): Partial<Record<HookEvent, HookCallbackMatcher[]>> => {
+  const { scratchpad, tracker, escalations, recordFileWritten } = deps;
+
+  const onPreToolUse = async (
+    input: HookInput,
+    toolUseId: string | undefined,
+  ): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "PreToolUse") return PROCEED;
+    tracker.bindToolUse(toolUseId);
+    tracker.countToolCall();
+
+    if (input.tool_name.endsWith("__execute_sql")) {
+      const sql = String((input.tool_input as { sql?: unknown }).sql ?? "");
+      if (!isReadOnlySql(sql)) {
+        scratchpad.record(
+          tracker.active(),
+          tracker.currentPhase(),
+          "permission_denied",
+          `blocked non-read SQL on ${input.tool_name}`,
+          { sql: sql.slice(0, 300) },
+        );
+        return deny(
+          "Only read-only SQL is allowed in an orchestrated run. Rewrite it as a SELECT or EXPLAIN, or escalate at level human.",
+        );
+      }
+    }
+    const detail = describeInput(input.tool_input as Record<string, unknown>);
+    scratchpad.record(
+      tracker.active(),
+      tracker.currentPhase(),
+      "tool_use",
+      detail ? `${input.tool_name} ${detail}` : input.tool_name,
+      { toolUseId, tool: input.tool_name },
+    );
+    return PROCEED;
+  };
+
+  const onPostToolUse = async (
+    input: HookInput,
+    toolUseId: string | undefined,
+  ): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "PostToolUse") return PROCEED;
+    if (WRITING_TOOLS.has(input.tool_name)) {
+      const file = (input.tool_input as { file_path?: unknown }).file_path;
+      if (typeof file === "string" && file.length > 0) recordFileWritten(file);
+    }
+    scratchpad.record(
+      tracker.active(),
+      tracker.currentPhase(),
+      "tool_result",
+      input.tool_name,
+      { toolUseId },
+    );
+    return PROCEED;
+  };
+
+  const onPostToolUseFailure = async (
+    input: HookInput,
+    toolUseId: string | undefined,
+  ): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "PostToolUseFailure") return PROCEED;
+    tracker.countFailure();
+    const agent = tracker.active();
+    const raw = (input as { error?: unknown }).error;
+    const reason =
+      typeof raw === "string"
+        ? raw.slice(0, 400)
+        : JSON.stringify(raw ?? {}).slice(0, 400);
+    scratchpad.record(
+      agent,
+      tracker.currentPhase(),
+      "tool_error",
+      `${input.tool_name} failed — ${reason}`,
+      { toolUseId, tool: input.tool_name },
+    );
+    await escalations.raise({
+      from: agent,
+      phase: tracker.currentPhase(),
+      level: "retry",
+      summary: `${input.tool_name} failed`,
+      detail: reason,
+      repeatKey: `${agent}:${input.tool_name}`,
+    });
+    return PROCEED;
+  };
+
+  const onPermissionDenied = async (
+    input: HookInput,
+  ): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "PermissionDenied") return PROCEED;
+    const agent = tracker.active();
+    scratchpad.record(
+      agent,
+      tracker.currentPhase(),
+      "permission_denied",
+      `denied ${input.tool_name}`,
+      { tool: input.tool_name },
+    );
+    await escalations.raise({
+      from: agent,
+      phase: tracker.currentPhase(),
+      level: "orchestrator",
+      summary: `Permission denied for ${input.tool_name}`,
+      blocker: "The run is not allowed to perform this action.",
+      repeatKey: `${agent}:denied:${input.tool_name}`,
+    });
+    return PROCEED;
+  };
+
+  const onSubagentStart = async (input: HookInput): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "SubagentStart") return PROCEED;
+    tracker.start({
+      agentId: input.agent_id,
+      agentType: input.agent_type,
+    });
+    return PROCEED;
+  };
+
+  const onSubagentStop = async (input: HookInput): Promise<HookJSONOutput> => {
+    if (input.hook_event_name !== "SubagentStop") return PROCEED;
+    tracker.stop(input.agent_id, input.last_assistant_message);
+    return PROCEED;
+  };
+
+  const one = (hook: HookCallbackMatcher["hooks"][number]) => [
+    { hooks: [hook] },
+  ];
+
+  return {
+    PreToolUse: one(onPreToolUse),
+    PostToolUse: one(onPostToolUse),
+    PostToolUseFailure: one(onPostToolUseFailure),
+    PermissionDenied: one(onPermissionDenied),
+    SubagentStart: one(onSubagentStart),
+    SubagentStop: one(onSubagentStop),
+  };
+};

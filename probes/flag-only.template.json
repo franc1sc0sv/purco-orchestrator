@@ -1,0 +1,8 @@
+{
+  "name": "CHANGE_ME",
+  "ticket": "PURCO-0000",
+  "flag": "ENABLE_SOMETHING|enable_something",
+  "flagLabel": "the something flag",
+  "scanRoots": ["src"],
+  "maxClusterRows": 25
+}
