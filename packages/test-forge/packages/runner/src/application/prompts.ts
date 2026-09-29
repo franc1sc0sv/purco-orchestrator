@@ -1,4 +1,4 @@
-import { PREDICATE_KEY_OF } from "../domain/cycle.ts";
+import { PREDICATE_KEY_OF, SUGGESTED_POST } from "../domain/cycle.ts";
 import type { CycleAssignment, WorkGroup, WorkRef } from "../domain/cycle.ts";
 import { RUNNER_TOOLS } from "./tool-refs.ts";
 import { PREDICATE_IDS, PREDICATE_NAMES } from "test-forge-contracts/gates";
@@ -23,6 +23,8 @@ export type CycleFacts = {
   survivingMutants: number;
   pendingMutants: number;
   units: readonly UnitSummary[];
+  hasAsk: boolean;
+  elapsedSeconds: number;
 };
 
 export type OpeningFacts = {
@@ -34,6 +36,7 @@ export type OpeningFacts = {
   project: Project;
   cwd: string;
   approved: boolean;
+  hasAsk: boolean;
 };
 
 export const vectorLine = (vector: DoneVector): string =>
@@ -53,7 +56,7 @@ const groupLines = (group: WorkGroup): string => {
   const shown = group.refs.slice(0, MAX_REFS).map(refLine);
   const hidden = group.refs.length - shown.length;
   const more = hidden > 0 ? `\n    (+${hidden} more)` : "";
-  return `- ${group.predicate}: ${group.reason}\n    ${shown.join(
+  return `- ${group.predicate} -> ${SUGGESTED_POST[group.predicate]}: ${group.reason}\n    ${shown.join(
     "\n    "
   )}${more}`;
 };
@@ -75,6 +78,16 @@ const unitLines = (units: readonly UnitSummary[]): string =>
         )
         .join("\n");
 
+const humanChannel = (hasAsk: boolean): string =>
+  hasAsk
+    ? `Captain Lasky is reachable while a cycle runs: call the \`ask\` tool with one precise question,
+the options as (a), (b), (c), and what each costs. It blocks until he answers, and the run goes on.
+Use it for waivers and equivalence signatures as well. End the run BLOCKED only when his answer
+says the run must stop.`
+    : `Captain Lasky is not at the console while a cycle runs. Anything you would ask him must become
+a BLOCKED exit carrying one precise question: the fact that forced it, the options as (a), (b), (c),
+and what each costs.`;
+
 export const openingPrompt = ({
   operation,
   focus,
@@ -84,29 +97,31 @@ export const openingPrompt = ({
   project,
   cwd,
   approved,
-}: OpeningFacts): string => `You are Commander Sarah Palmer. This is a HEADLESS Test Forge operation: Captain Lasky
-is not at the console while a cycle runs. Anything you would normally ask him in
-conversation must instead become a BLOCKED exit carrying one precise question.
+  hasAsk,
+}: OpeningFacts): string => `You are Commander Sarah Palmer, running one Test Forge operation. The operation procedure is in
+your system prompt, after your post.
+
+${humanChannel(hasAsk)}
 
 Project: ${project.projectKey} (${project.shortName})
 Repository root: ${project.rootPath}
 Scope: ${scope}
-Run id: ${runId} - ${
+Run id: ${runId}. The host already opened this run with ${
   RUNNER_TOOLS.ledgerRunStart
-} already opened this run and already loaded the focus
-lines as D9 items. Do not call ${RUNNER_TOOLS.ledgerRunStart} again.
+} and loaded the focus lines
+as D9 items, so do not call ${RUNNER_TOOLS.ledgerRunStart} again.
 
 Every Roland tool call takes cwd: "${cwd}".
 
 Captain Lasky asked for:
-<<<OPERATION
+<operation>
 ${operation}
-OPERATION
+</operation>
 
 The run focus, verbatim:
-<<<FOCUS
+<focus>
 ${focus}
-FOCUS
+</focus>
 
 Target paths:
 ${
@@ -115,32 +130,40 @@ ${
     : "- none named; derive them from the focus"
 }
 
-Invoke the test-forge skill and follow it. Spawn every squad through the Agent tool,
-naming the subagent by its callsign in lower case with dashes - jai-006, linda-058,
-john-117, locke, carter-a259, jonah, parangosky. One Spartan owns one file. One
-Inspector holds one rule against one file.
+Spawn every squad member through the Agent tool, with subagent_type set to its callsign in lower
+case with dashes: jai-006, linda-058, john-117, locke, carter-a259, jonah, parangosky. One Spartan
+owns one file. One Inspector holds one rule against one file.
 
 ${
   approved
-    ? `Captain Lasky approved the plan on the command line. Work phase 1 to produce the
-matrix, the closure and the aspect list, then continue into phase 2 and keep going.
-You do not stop to ask permission to spawn.`
-    : `Captain Lasky has NOT approved a plan. THIS CYCLE PRODUCES THE PLAN AND NOTHING ELSE.
-Read-only phase 1 work is permitted - Linda-058, Samuel-034, ${RUNNER_TOOLS.closureUnresolved},
-${RUNNER_TOOLS.codexRulesFor}, ${RUNNER_TOOLS.codexRuleGet}. Then present the plan in full and stop. Spawn no author,
-write no test, post no verdict, and do not close the run. End your turn with the plan and
-the line "PLAN READY FOR APPROVAL".`
+    ? `Captain Lasky approved the plan. Work phase 1 to produce the matrix, the closure and the aspect
+list, then continue into phase 2 and keep going. You do not stop to ask permission to spawn.`
+    : `Captain Lasky has not approved a plan yet, so this cycle produces the plan and nothing else.
+Read-only phase 1 work is allowed: Linda-058, Samuel-034, ${RUNNER_TOOLS.closureUnresolved},
+${RUNNER_TOOLS.codexRulesFor}, ${RUNNER_TOOLS.codexRuleGet}. Then present the plan in full and stop.
+Spawn no author, write no test, post no verdict, and do not close the run. End your turn with the
+plan and the line "PLAN READY FOR APPROVAL".`
 }
 
-Close every cycle the way the skill says: ${
+Close every cycle the way the procedure says: ${
   RUNNER_TOOLS.gatesEvaluate
-} for the done vector and the work
-list, then ${RUNNER_TOOLS.ledgerPassRecord} for this run, then the pass JSON. ${
+} for the done vector and the work list,
+then ${RUNNER_TOOLS.ledgerPassRecord} for this run, then the pass JSON. ${
   RUNNER_TOOLS.gatesEvaluate
-} owns the
-vector - never assemble one yourself and never hand one to ${
-  RUNNER_TOOLS.ledgerPassRecord
-}.`;
+} owns the vector,
+so never assemble one yourself and never hand one to ${RUNNER_TOOLS.ledgerPassRecord}.`;
+
+export const planReplyPrompt = (approved: boolean, notes: string): string =>
+  approved
+    ? `Captain Lasky approved the plan${notes ? ` with this note: ${notes}` : ""}. Work phase 1 to produce the
+matrix, the closure and the aspect list, then continue into phase 2 and keep going. You do not stop
+to ask permission to spawn.`
+    : `Captain Lasky read the plan and wants changes:
+<notes>
+${notes}
+</notes>
+Revise the plan to follow his notes, present it in full, and stop. End your turn with the line
+"PLAN READY FOR APPROVAL".`;
 
 export const cyclePrompt = (
   facts: CycleFacts,
@@ -173,19 +196,22 @@ Mutants surviving unexplained: ${facts.survivingMutants}; pending: ${
 
 Every Roland tool call takes cwd: "${facts.cwd}".
 
-Assign only the false predicates, only to the squad that owns each one, only on the
-items listed above. Never re-open a true predicate. Never task two squads on one item.
+Assign only the false predicates, to the post each work group names, and only on the items
+listed. Departing from a named post needs an override in assignment_record. Do not re-open a
+true predicate, and do not task two squads on one item.
 Then call ${
   RUNNER_TOOLS.gatesEvaluate
 } for the fresh vector and work list, call ${RUNNER_TOOLS.ledgerPassRecord} for
 this run without handing it a vector, and emit the pass JSON.
 
-If a work item cannot advance without Captain Lasky, call ${
-  RUNNER_TOOLS.ledgerRunEnd
-} with exitKind
-BLOCKED and ONE precise question: the fact that forced it, the options as (a), (b), (c),
-and what each costs. If the vector is identical to the previous pass a second time, call
+${
+  facts.hasAsk
+    ? "If a work item cannot advance without Captain Lasky, call `ask` with one precise question, the options as (a), (b), (c), and what each costs."
+    : `If a work item cannot advance without Captain Lasky, call ${RUNNER_TOOLS.ledgerRunEnd} with exitKind BLOCKED and one precise question: the fact that forced it, the options as (a), (b), (c), and what each costs.`
+} If the vector is identical to the previous pass a second time, call
 ${RUNNER_TOOLS.ledgerRunEnd} with exitKind STALLED. If all ten are true, call ${
   RUNNER_TOOLS.ledgerRunEnd
 } with
-exitKind DONE.`;
+exitKind DONE.
+
+elapsed ${facts.elapsedSeconds}s`;

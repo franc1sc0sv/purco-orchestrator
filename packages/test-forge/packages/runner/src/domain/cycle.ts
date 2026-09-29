@@ -21,6 +21,19 @@ export const PREDICATE_KEY_OF: Record<PredicateId, PredicateKey> = {
   D10: "d10",
 };
 
+export const SUGGESTED_POST: Record<PredicateId, string> = {
+  D1: "Majestic: Thorne, the Armorer",
+  D2: "Osiris Inspectors, then the owning author",
+  D3: "Majestic: Grant, the Stress post",
+  D4: "Noble Team",
+  D5: "Headhunters",
+  D6: "the author who owns that file",
+  D7: "Blue Team: Samuel-034, the Quartermaster",
+  D8: "Blue Team: Linda-058, the Pathfinder",
+  D9: "the Blue Team author, or a waiver from the human",
+  D10: "the human, on your written question",
+};
+
 export type WorkRef = {
   ref: string;
   location: string;

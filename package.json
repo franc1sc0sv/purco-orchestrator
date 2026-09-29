@@ -1,35 +1,24 @@
 {
   "name": "purco-orchestrator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "purco-orchestrate": "./bin/purco-orchestrate.js",
-    "purco-census": "./bin/purco-census.js",
-    "purco-eval": "./bin/purco-eval.js",
-    "purco-spike": "./bin/purco-spike.js"
-  },
+  "workspaces": [
+    "packages/engine",
+    "packages/test-forge/packages/*"
+  ],
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "smoke": "node --experimental-strip-types src/smoke.ts",
-    "start": "node bin/purco-orchestrate.js",
-    "census": "node bin/purco-census.js",
-    "eval": "node bin/purco-eval.js",
-    "spike": "node bin/purco-spike.js",
-    "hub-test": "node --experimental-strip-types src/hub-test.ts",
-    "engine-test": "node --experimental-strip-types src/engine-test.ts"
-  },
-  "engines": {
-    "node": ">=22"
-  },
-  "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.258",
-    "pg": "^8.23.0",
-    "zod": "^4.5.4"
+    "check": "npm run typecheck -w purco-engine && tsc --noEmit -p packages/test-forge/tsconfig.base.json",
+    "engine-test": "npm run engine-test -w purco-engine",
+    "hub-test": "npm run hub-test -w purco-engine",
+    "smoke": "npm run smoke -w purco-engine",
+    "forge-mcp": "node packages/test-forge/packages/mcp/src/server.ts"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
-    "@types/pg": "^8.23.1",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.20.0"
   }
 }

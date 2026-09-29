@@ -4,43 +4,35 @@ Test Forge is a multi-agent system that first learns a repository's testing stan
 it already has, and then writes new integration tests to those standards. A doctrine session turns
 each standard into a **rule** — a detection procedure with fixtures, a rubric and a human signature —
 and an operation drives a squad of agents until ten objective predicates are all true. Nothing is
-installed into any repository: the whole system lives under `~/.claude/testing` and works on every
-project you point it at.
+installed into any repository: the system lives in `packages/test-forge` of the purco-orchestrator
+monorepo and works on every project you point it at.
 
 ---
 
-## Getting started — hand this to your AI
+## Where it lives now
 
-Clone this repository, open a Claude Code session anywhere, and paste the block below. It performs
-the whole installation and stops when `/test-forge` is ready to use.
+Test Forge is one package of `purco-orchestrator`, imported with its full history. It has two hosts:
 
-> Set up Test Forge on this machine. Work through these steps in order and stop at the first one
-> that fails, telling me exactly what failed.
->
-> 1. Confirm `node --version` is 22 or newer. The server runs TypeScript directly through Node's
->    native type stripping, so there is no build step. If it is older, stop and tell me.
-> 2. Confirm Docker Desktop is running with `docker ps`. If it is not, stop and tell me.
-> 3. Move this clone to `~/.claude/testing` if it is not already there, then run `npm install`
->    in it.
-> 4. Copy each of `skills/test-forge`, `skills/test-rules`, `skills/test-replay` and
->    `skills/test-status` into `~/.claude/skills/`.
-> 5. Register the MCP server at user scope:
->    `claude mcp add-json test-forge '{"command":"node","args":["'"$HOME"'/.claude/testing/packages/mcp/src/server.ts"]}' --scope user`
-> 6. Verify with `claude mcp list` that `test-forge` is connected. If it is not, stop and tell me.
-> 7. Add Docker Desktop's binary directory to my shell `PATH` if it is missing —
->    `/Applications/Docker.app/Contents/Resources/bin` on macOS. Without it the credential helper
->    cannot be resolved and every mutation campaign fails to boot. Do not skip this.
-> 8. Tell me to restart my Claude Code session, because the MCP server only loads its code when the
->    process starts.
->
-> After I restart, in a session opened inside the repository I want to test:
->
-> 9. Read `~/.claude/testing/codex-exports/purco-web-backend.codex.json` and import it with the
->    `codex_import` tool, passing the file's contents as the payload, my repository path as `cwd`,
->    and **`markAdvisory: false`** so the rules keep the severities the team already agreed —
->    23 blocking and 3 advisory. Then confirm those counts came through.
-> 10. Confirm the tool list contains `mutation_campaign_start`, `mutation_batch_run` and
->     `board_outcome_record_batch`, then run `/test-status` and show me the board.
+- **The PurCo orchestrator** runs an operation as the `test` step of a ticket, or as the standalone
+  `test` workflow. Palmer's questions, the plan approval and every signature reach the human through
+  the run's mailbox, so the run does not end BLOCKED to ask something.
+- **The headless runner**, `packages/runner/src/main.ts`, for use outside a ticket.
+
+The operation procedure, which used to be the `test-forge` skill, is now
+`resources/doctrine/operation.md`. Every agent also gets the shared protocol in
+`resources/doctrine/agent-protocol.md`. Each brief's frontmatter names its model (Opus 5.5 or
+Sonnet 5.5) and its effort.
+
+Register the MCP server once per Claude profile:
+
+```bash
+claude mcp add-json test-forge '{"command":"node","args":["/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/packages/mcp/src/server.ts"]}' --scope user
+```
+
+Add Docker Desktop's binary directory to the shell `PATH` if it is missing,
+`/Applications/Docker.app/Contents/Resources/bin` on macOS. Without it every mutation campaign fails
+to boot. Restart the Claude Code session after the registration and after every pull, because a
+running server keeps the code it loaded.
 
 Full detail, and what to do when something goes wrong, is in [SETUP.md](SETUP.md).
 
@@ -56,26 +48,26 @@ a time**: six workers is six Vitest processes plus a container set.
 
 ## The four commands
 
-There are four commands and no others.
+The commands are subcommands of the `/purco` skill.
 
-| Command        | What it does                                                                                                                                                                            | When you run it                                                                                                                                  |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/test-rules`  | A doctrine session. Learns rules from the existing test corpus, then grills you until each rule is enforceable, fixtured and frozen into the codex. Writes no test and runs no test.    | Once per repository before anything else. Again whenever a standard changes, an aspect is empty, or a review keeps arguing about the same thing. |
-| `/test-forge`  | One operation. Writes the tests, reviews them rule by rule, runs them, verifies every failure, mutates the source to prove the tests bite, prunes the tests that earn nothing, reports. | When you want a test suite for named use cases or files — written, proved and finished, not drafted.                                             |
-| `/test-replay` | Re-runs every recorded War Games scenario (a past agent failure) against the current briefs and current rules. Reports total, passing, newly regressed, newly fixed.                    | After **any** change to a rule, a rubric, a fixture set or an agent brief. Before trusting a restored rank.                                      |
-| `/test-status` | Shows the board: every agent post, its rank, score, trend and state, and the one thing worth your attention. Read-only.                                                                 | When you want to know which aspect is weak or what to run next.                                                                                  |
+| Command         | What it does                                                                                                                                                                            | When you run it                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/purco rules`  | A doctrine session. Learns rules from the existing test corpus, then grills you until each rule is enforceable, fixtured and frozen into the codex. Writes no test and runs no test.    | Once per repository before anything else. Again whenever a standard changes, an aspect is empty, or a review keeps arguing about the same thing. |
+| `/purco test`   | One operation. Writes the tests, reviews them rule by rule, runs them, verifies every failure, mutates the source to prove the tests bite, prunes the tests that earn nothing, reports. | When you want a test suite for named use cases or files — written, proved and finished, not drafted. A ticket run does this as its test step.   |
+| `/purco replay` | Re-runs every recorded War Games scenario (a past agent failure) against the current briefs and current rules. Reports total, passing, newly regressed, newly fixed.                    | After any change to a rule, a rubric, a fixture set or an agent brief. Before trusting a restored rank.                                          |
+| `/purco board`  | Shows the board: every agent post, its rank, score, trend and state, and the one thing worth your attention. Read-only.                                                                 | When you want to know which aspect is weak or what to run next.                                                                                  |
 
 ### The one hard rule
 
-**`/test-forge` refuses to run without a codex for the scope.** The first thing it does is call
-`codex_gaps` and `codex_rules_for`. If no rule is accepted for `backend` or `frontend`, it does not
-open a run, does not spawn an agent, and does not write a test "in the meantime". It tells you to run
-`/test-rules` first. A test written against no standard cannot be reviewed against one, so the
-refusal is the feature.
+An operation refuses to start without an accepted codex for the scope. The host checks
+`codex_rules_for` in code before it opens a run. With no accepted rule for `backend` or `frontend`,
+it opens no run, spawns no agent and writes no test, and it says to run `/purco rules` first. A test
+written against no standard cannot be reviewed against one, so the refusal is the feature. In a
+ticket run, the engine then falls back to its plain tester worker for that step.
 
 ### The one habit
 
-**Run `/test-replay` after any rule change.** A rule edit that fixes one detection usually breaks
+Run `/purco replay` after any rule change. A rule edit that fixes one detection usually breaks
 another, and the War Games corpus is the only thing that tells you which. Replay is cheap; a silently
 weakened inspector is not. The same habit covers a rubric edit, a new fixture and any change to an
 agent brief.
@@ -123,17 +115,11 @@ Node **22.20 or later** is required. Node strips TypeScript types natively, so t
 `node:sqlite` module, so nothing is compiled and no native dependency is installed.
 
 ```bash
-cd ~/.claude/testing
+cd /Users/franciscohernandez/projects/purco-projects/purco-orchestrator
 npm install
 ```
 
-That one install covers every package — `packages/` is an npm workspace.
-
-Type-check the whole workspace at any time:
-
-```bash
-npm run check
-```
+That one install covers every package of the monorepo, Test Forge included.
 
 ### Register the MCP server
 
@@ -141,7 +127,7 @@ Roland is the tool layer. Every command reaches it as `mcp__test-forge__<tool>`,
 at user scope, and every project sees it:
 
 ```bash
-claude mcp add --scope user test-forge -- node /Users/franciscohernandez/.claude/testing/packages/mcp/src/server.ts
+claude mcp add --scope user test-forge -- node /Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/packages/mcp/src/server.ts
 ```
 
 Check it:

@@ -69,7 +69,7 @@ const main = async (): Promise<number> => {
       ? values.focus ?? ""
       : readFileSync(resolve(focusFile), "utf8");
 
-  return runOperation({
+  const result = await runOperation({
     cwd: resolve(values.cwd ?? process.cwd()),
     scope: scopeOf(values.scope),
     focus,
@@ -79,6 +79,7 @@ const main = async (): Promise<number> => {
     openNew: values.new === true,
     approvePlan: values["approve-plan"] === true,
   });
+  return result.code;
 };
 
 main()

@@ -10,6 +10,7 @@ import {
 } from "./standing-orders.ts";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
+  McpServerConfig,
   SDKMessage,
   SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -30,6 +31,11 @@ export type CycleRequest = {
   resume: string | null;
   abortController: AbortController;
   onEvent: (event: CycleEvent) => void;
+  model?: string | undefined;
+  effort?: "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+  extraServers?: Record<string, McpServerConfig> | undefined;
+  extraAllowedTools?: readonly string[] | undefined;
+  env?: Record<string, string | undefined> | undefined;
 };
 
 export type CycleOutcome = {
@@ -83,6 +89,11 @@ export const runCycle = async ({
   resume,
   abortController,
   onEvent,
+  model,
+  effort,
+  extraServers,
+  extraAllowedTools,
+  env,
 }: CycleRequest): Promise<CycleOutcome> => {
   const stream = query({
     prompt,
@@ -91,17 +102,25 @@ export const runCycle = async ({
       agents,
       abortController,
       ...(resume === null ? {} : { resume }),
-      allowedTools: [...ALLOWED_TOOLS],
+      ...(model === undefined ? {} : { model }),
+      ...(effort === undefined ? {} : { effort }),
+      env: {
+        CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: "6",
+        CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: "1",
+        ...(env ?? {}),
+      },
+      allowedTools: [...ALLOWED_TOOLS, ...(extraAllowedTools ?? [])],
       disallowedTools: [...DENIED_TOOLS],
       permissionMode: "acceptEdits",
       canUseTool: permissionAnswer(projectRoot),
-      settingSources: ["user", "project"],
+      settingSources: ["project"],
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
         append: systemPromptAppend,
       },
       mcpServers: {
+        ...(extraServers ?? {}),
         [MCP_SERVER_KEY]: {
           type: "stdio",
           command: process.execPath,

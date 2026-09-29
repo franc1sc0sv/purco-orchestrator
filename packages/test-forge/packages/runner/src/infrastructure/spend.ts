@@ -25,12 +25,15 @@ const tokens = new Intl.NumberFormat("en-US");
 export const addUsage = (
   totals: SpendTotals,
   usage: CycleUsage,
-  cycle: number
+  cycle: number,
+  resumed: boolean
 ): SpendTotals => ({
   outputTokens: totals.outputTokens + usage.outputTokens,
   inputTokens: totals.inputTokens + usage.inputTokens,
   cacheReadTokens: totals.cacheReadTokens + usage.cacheReadTokens,
-  costUsd: totals.costUsd + usage.costUsd,
+  costUsd: resumed
+    ? Math.max(totals.costUsd, usage.costUsd)
+    : totals.costUsd + usage.costUsd,
   cycles: cycle,
 });
 

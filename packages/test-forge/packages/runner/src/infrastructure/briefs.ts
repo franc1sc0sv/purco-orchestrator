@@ -1,4 +1,4 @@
-import { AGENTS_PATH, MCP_TOOL_PREFIX } from "./install.ts";
+import { AGENTS_PATH, MCP_TOOL_PREFIX, RESOURCES_PATH } from "./install.ts";
 import type { AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
@@ -24,17 +24,33 @@ const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
   "Write",
 ]);
 
-const EFFORTS = ["low", "medium", "high"] as const;
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export type Effort = (typeof EFFORTS)[number];
 
 const isEffort = (value: string): value is Effort =>
   EFFORTS.includes(value as Effort);
 
+export const MODEL_IDS = {
+  opus: "claude-opus-5-5",
+  sonnet: "claude-sonnet-5-5",
+} as const;
+
+export type ModelAlias = keyof typeof MODEL_IDS;
+
+const isModelAlias = (value: string): value is ModelAlias =>
+  Object.hasOwn(MODEL_IDS, value);
+
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const OBJECTIVE =
   /^##\s+Your objective\s*\r?\n+([\s\S]*?)(?=\r?\n#{1,2}\s|\s*$)/m;
 const DESCRIPTION_LIMIT = 600;
+
+export const AGENT_PROTOCOL_PATH = join(
+  RESOURCES_PATH,
+  "doctrine",
+  "agent-protocol.md"
+);
 
 export type Brief = {
   path: string;
@@ -45,6 +61,7 @@ export type Brief = {
   callsigns: string[];
   tools: string[];
   effort: Effort | null;
+  model: string | null;
   body: string;
 };
 
@@ -146,6 +163,7 @@ export const readBrief = (path: string): Brief => {
     .map(stripQualifier)
     .filter((entry) => !isPlaceholder(entry));
   const effort = (data["effort"] ?? "").toLowerCase();
+  const model = (data["model"] ?? "").toLowerCase();
 
   return {
     path,
@@ -156,6 +174,7 @@ export const readBrief = (path: string): Brief => {
     callsigns,
     tools: splitList(data["tools"]),
     effort: isEffort(effort) ? effort : null,
+    model: isModelAlias(model) ? MODEL_IDS[model] : null,
     body,
   };
 };
@@ -184,15 +203,17 @@ export const buildAgents = ({
   includeCommand = false,
 }: BuildAgentsOptions = {}): AgentMap => {
   const agents: AgentMap = {};
+  const protocol = readFileSync(AGENT_PROTOCOL_PATH, "utf8").trim();
 
   for (const brief of readBriefs(root)) {
     if (!includeCommand && slug(brief.squad) === "command") continue;
 
     const definition: AgentDefinition = {
       description: describe(brief),
-      prompt: brief.body,
+      prompt: `${brief.body}\n\n---\n\n${protocol}`,
       tools: brief.tools.map(qualifyTool),
       ...(brief.effort === null ? {} : { effort: brief.effort }),
+      ...(brief.model === null ? {} : { model: brief.model }),
     };
 
     const keys = [

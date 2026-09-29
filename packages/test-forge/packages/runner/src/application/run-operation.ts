@@ -1,9 +1,14 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { planCycle } from "../domain/cycle.ts";
 import type { ExitDecision } from "../domain/exit.ts";
 import { decideExit } from "../domain/exit.ts";
 import { buildAgents, findBrief } from "../infrastructure/briefs.ts";
-import { line, rule } from "../infrastructure/console.ts";
-import { ENTRY_COMMAND } from "../infrastructure/install.ts";
+import { line as consoleLine } from "../infrastructure/console.ts";
+import {
+  ENTRY_COMMAND,
+  RESOURCES_PATH,
+} from "../infrastructure/install.ts";
 import { latestOpenRun } from "../infrastructure/ledger.ts";
 import { runCycle } from "../infrastructure/sdk.ts";
 import type { CycleEvent } from "../infrastructure/sdk.ts";
@@ -17,15 +22,29 @@ import { addUsage, printSpend } from "../infrastructure/spend.ts";
 import {
   cyclePrompt,
   openingPrompt,
+  planReplyPrompt,
   vectorLine,
   workLines,
 } from "./prompts.ts";
+import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { PREDICATE_NAMES } from "test-forge-contracts/gates";
 import type { Scope } from "test-forge-contracts/project";
+import { rulesFor } from "test-forge-mcp-server/src/application/codex/rules-for.ts";
 import { evaluateGates } from "test-forge-mcp-server/src/application/gates/evaluate.ts";
+import { runReopen } from "test-forge-mcp-server/src/application/ledger/run-reopen.ts";
 import { runStart } from "test-forge-mcp-server/src/application/ledger/run-start.ts";
 import { state } from "test-forge-mcp-server/src/application/ledger/state.ts";
 import { resolveProject } from "test-forge-mcp-server/src/infrastructure/project.ts";
+
+export type HumanKind = "gate" | "question" | "sign";
+
+export type OperationHost = {
+  line: (text: string) => void;
+  askHuman?: (kind: HumanKind, text: string) => Promise<string | undefined>;
+  mcpServers?: Record<string, McpServerConfig>;
+  allowedTools?: readonly string[];
+  env?: Record<string, string | undefined>;
+};
 
 export type OperationRequest = {
   cwd: string;
@@ -36,6 +55,15 @@ export type OperationRequest = {
   runId: number | null;
   openNew: boolean;
   approvePlan: boolean;
+  host?: OperationHost;
+};
+
+export type OperationResult = {
+  code: number;
+  runId: number | null;
+  exit: ExitDecision | null;
+  costUsd: number;
+  refusal?: string;
 };
 
 type ResolvedRun = {
@@ -44,11 +72,25 @@ type ResolvedRun = {
   focusItems: number;
 };
 
+const PALMER_MODEL = "claude-opus-5-5";
+const MAX_REOPENS = 3;
+const APPROVE = /^\s*(approve|approved|yes|y|ok|go|continue)\b/i;
+const STOP = /^\s*stop\b/i;
+const SIGNATURE = /waive|waiver|equivalen|sign/i;
+
+const OPERATION_DOCTRINE = readFileSync(
+  join(RESOURCES_PATH, "doctrine", "operation.md"),
+  "utf8",
+);
+
+const CONSOLE_HOST: OperationHost = { line: consoleLine };
+
 const resolveRun = async (
   request: OperationRequest,
   projectKey: string,
 ): Promise<ResolvedRun> => {
   if (request.runId !== null) {
+    await runReopen({ cwd: request.cwd, runId: request.runId });
     return { runId: request.runId, opened: false, focusItems: 0 };
   }
   if (!request.openNew) {
@@ -76,13 +118,38 @@ const resolveRun = async (
   };
 };
 
+const codexRefusal = async (
+  cwd: string,
+  scope: Scope | null,
+): Promise<string | undefined> => {
+  if (scope === null) return undefined;
+  const { rules } = await rulesFor({ cwd, scope });
+  if (rules.some((entry) => entry.acceptance !== null)) return undefined;
+  return `This project has no accepted ${scope} codex. Test Forge enforces the repository's own doctrine, and there is nothing here to enforce. Run the rules session for scope ${scope} first, then start the operation again.`;
+};
+
 const resumeHint = (cwd: string, runId: number): string =>
   `  ${ENTRY_COMMAND} --cwd ${cwd} --run ${runId} --approve-plan`;
 
 export const runOperation = async (
   request: OperationRequest,
-): Promise<number> => {
+): Promise<OperationResult> => {
+  const host = request.host ?? CONSOLE_HOST;
+  const say = host.line;
+  const rule = (label: string): void =>
+    say(`\n==== ${label} ${"=".repeat(Math.max(4, 72 - label.length))}`);
+  const ask = host.askHuman;
+  const hasAsk = ask !== undefined;
   const { cwd } = request;
+
+  const refusal = request.runId === null
+    ? await codexRefusal(cwd, request.scope)
+    : undefined;
+  if (refusal !== undefined) {
+    say(refusal);
+    return { code: 3, runId: null, exit: null, costUsd: 0, refusal };
+  }
+
   const project = await resolveProject(cwd);
   const { runId, opened, focusItems } = await resolveRun(
     request,
@@ -92,13 +159,18 @@ export const runOperation = async (
   let snapshot = await state({ cwd, runId });
   if (snapshot.run.exitKind !== null) {
     const recorded = snapshot.run.exitReason ?? "";
-    line(
+    say(
       `Run ${runId} already exited ${snapshot.run.exitKind}: ${
         recorded.length > 0 ? recorded : "no reason recorded"
       }`,
     );
-    line("Open a new one with --new.");
-    return 0;
+    say("Open a new one with --new.");
+    return {
+      code: 0,
+      runId,
+      exit: { kind: snapshot.run.exitKind, reason: recorded },
+      costUsd: 0,
+    };
   }
 
   let gates = await evaluateGates({ cwd, runId });
@@ -108,18 +180,18 @@ export const runOperation = async (
 
   const agents = buildAgents();
   const palmer = findBrief("palmer");
+  const systemPromptAppend = `${palmer.body}\n\n---\n\n${OPERATION_DOCTRINE}`;
   const abortController = new AbortController();
   const startedAt = Date.now();
   let interrupted = false;
 
-  process.on("SIGINT", () => {
+  const onSigint = (): void => {
     if (interrupted) process.exit(130);
     interrupted = true;
-    line(
-      "\nInterrupt received. Finishing the stream, then saving the session.",
-    );
+    say("\nInterrupt received. Finishing the stream, then saving the session.");
     abortController.abort();
-  });
+  };
+  process.on("SIGINT", onSigint);
 
   const onEvent = (event: CycleEvent): void => {
     if (event.kind === "session") {
@@ -129,74 +201,82 @@ export const runOperation = async (
       return;
     }
     if (event.kind === "text") {
-      line(event.text);
+      say(event.text);
       return;
     }
     if (event.kind === "tool") {
-      line(`  -> ${event.label}`);
+      say(`  -> ${event.label}`);
       return;
     }
     if (event.kind === "task") {
-      line(`  .. ${event.description} started`);
+      say(`  .. ${event.description} started`);
       return;
     }
-    line(event.text);
+    say(event.text);
   };
 
   rule("TEST FORGE");
-  line(`Project      ${project.projectKey} (${project.shortName})`);
-  line(`Root         ${project.rootPath}`);
-  line(`Scope        ${snapshot.run.scope}`);
-  line(
+  say(`Project      ${project.projectKey} (${project.shortName})`);
+  say(`Root         ${project.rootPath}`);
+  say(`Scope        ${snapshot.run.scope}`);
+  say(
     `Run          ${runId} ${
       opened ? `opened, ${focusItems} focus items` : "resumed"
     }`,
   );
-  line(`Session      ${session.sessionId ?? "new"}`);
-  line(`Subagents    ${Object.keys(agents).length} callsigns loaded`);
-  line(
-    `Plan         ${
-      request.approvePlan
-        ? "approved by Captain Lasky"
-        : "NOT approved - plan cycle only"
-    }`,
-  );
+  say(`Session      ${session.sessionId ?? "new"}`);
+  say(`Subagents    ${Object.keys(agents).length} callsigns loaded`);
+  say(`Human        ${hasAsk ? "reachable through ask" : "not at the console"}`);
 
+  let approved = request.approvePlan;
+  let pendingPrompt: string | null = null;
   let exit: ExitDecision | null = null;
   let cyclesWithoutPass = 0;
+  let reopens = 0;
+
+  const finish = (result: OperationResult): OperationResult => {
+    process.off("SIGINT", onSigint);
+    return result;
+  };
 
   while (exit === null && !interrupted) {
     const cycle = session.cycles + 1;
     const opening = session.sessionId === null;
     const assignment = planCycle(gates.predicates, gates.workList);
-    const prompt = opening
-      ? openingPrompt({
-          operation: request.operation,
-          focus: snapshot.run.focus,
-          scope: snapshot.run.scope,
-          targets: request.targets,
-          runId,
-          project,
-          cwd,
-          approved: request.approvePlan,
-        })
-      : cyclePrompt(
-          {
-            cycle,
+    const prompt =
+      pendingPrompt ??
+      (opening
+        ? openingPrompt({
+            operation: request.operation,
+            focus: snapshot.run.focus,
+            scope: snapshot.run.scope,
+            targets: request.targets,
             runId,
+            project,
             cwd,
-            passes: snapshot.passes.length,
-            passStalled: snapshot.latestPass?.stalled ?? false,
-            openFindings: snapshot.findings.filter(
-              (finding) => finding.status === "open",
-            ).length,
-            survivingMutants: snapshot.mutation.surviving.length,
-            pendingMutants: snapshot.mutation.pending,
-            units: snapshot.units,
-          },
-          gates.predicates,
-          assignment,
-        );
+            approved,
+            hasAsk,
+          })
+        : cyclePrompt(
+            {
+              cycle,
+              runId,
+              cwd,
+              passes: snapshot.passes.length,
+              passStalled: snapshot.latestPass?.stalled ?? false,
+              openFindings: snapshot.findings.filter(
+                (finding) => finding.status === "open",
+              ).length,
+              survivingMutants: snapshot.mutation.surviving.length,
+              pendingMutants: snapshot.mutation.pending,
+              units: snapshot.units,
+              hasAsk,
+              elapsedSeconds: Math.round((Date.now() - startedAt) / 1000),
+            },
+            gates.predicates,
+            assignment,
+          ));
+    pendingPrompt = null;
 
     rule(`CYCLE ${cycle}`);
     const cycleStartedAt = Date.now();
@@ -207,14 +287,19 @@ export const runOperation = async (
       cwd,
       projectRoot: project.rootPath,
       agents,
-      systemPromptAppend: palmer.body,
+      systemPromptAppend,
       resume: session.sessionId,
       abortController,
       onEvent,
+      model: palmer.model ?? PALMER_MODEL,
+      effort: palmer.effort ?? "medium",
+      extraServers: host.mcpServers,
+      extraAllowedTools: host.allowedTools,
+      env: host.env,
     });
 
     session = {
-      ...addUsage(session, outcome.usage, cycle),
+      ...addUsage(session, outcome.usage, cycle, !opening),
       sessionId: session.sessionId,
     };
     saveSession(key, session);
@@ -230,21 +315,41 @@ export const runOperation = async (
       totals: session,
       elapsedMs: Date.now() - startedAt,
     });
-    line(`Vector       ${vectorLine(gates.predicates)}`);
+    say(`Vector       ${vectorLine(gates.predicates)}`);
 
     if (interrupted) break;
 
-    if (!request.approvePlan && opening) {
+    if (!approved) {
       rule("PLAN");
       const plan = outcome.resultText.trim();
-      if (plan.length > 0) line(plan);
-      line(
-        `\nThe plan is Captain Lasky's to approve. Re-run with:\n${resumeHint(
-          cwd,
-          runId,
-        )}`,
+      if (plan.length > 0) say(plan);
+      if (ask === undefined) {
+        say(
+          `\nThe plan is Captain Lasky's to approve. Re-run with:\n${resumeHint(
+            cwd,
+            runId,
+          )}`,
+        );
+        return finish({ code: 0, runId, exit: null, costUsd: session.costUsd });
+      }
+      const answer = await ask(
+        "gate",
+        `${plan}\n\n---\nTest Forge run ${runId}. Reply "approve" to start the operation, "stop" to end it here, or write what must change in the plan.`,
       );
-      return 0;
+      if (answer === undefined || STOP.test(answer)) {
+        return finish({
+          code: 0,
+          runId,
+          exit: { kind: "BLOCKED", reason: answer === undefined ? "no answer at the plan gate" : "the human stopped at the plan gate" },
+          costUsd: session.costUsd,
+        });
+      }
+      approved = APPROVE.test(answer);
+      pendingPrompt = planReplyPrompt(
+        approved,
+        approved ? answer.replace(APPROVE, "").trim() : answer,
+      );
+      continue;
     }
 
     cyclesWithoutPass =
@@ -258,33 +363,48 @@ export const runOperation = async (
       passStalled: snapshot.latestPass?.stalled ?? false,
       cyclesWithoutPass,
     });
+
+    if (exit?.kind === "BLOCKED" && ask !== undefined && reopens < MAX_REOPENS) {
+      const answer = await ask(
+        SIGNATURE.test(exit.reason) ? "sign" : "question",
+        `Test Forge run ${runId} is blocked:\n\n${exit.reason}`,
+      );
+      if (answer !== undefined && !STOP.test(answer)) {
+        await runReopen({ cwd, runId });
+        reopens += 1;
+        snapshot = await state({ cwd, runId });
+        pendingPrompt = `Captain Lasky answered your BLOCKED question:\n<answer>\n${answer}\n</answer>\nThe host reopened run ${runId}. Record what his answer requires, then continue the operation.`;
+        exit = null;
+        cyclesWithoutPass = 0;
+      }
+    }
   }
 
   if (exit === null) {
     rule("INTERRUPTED");
-    line(`Run ${runId} is still open. Resume with:`);
-    line(resumeHint(cwd, runId));
-    return 130;
+    say(`Run ${runId} is still open. Resume with:`);
+    say(resumeHint(cwd, runId));
+    return finish({ code: 130, runId, exit: null, costUsd: session.costUsd });
   }
 
   rule(exit.kind);
-  line(exit.reason.length > 0 ? exit.reason : "No reason recorded.");
+  say(exit.reason.length > 0 ? exit.reason : "No reason recorded.");
 
   if (exit.kind === "BLOCKED") {
-    line("\nAnswer the question, then resume with:");
-    line(resumeHint(cwd, runId));
-    return 0;
+    say("\nAnswer the question, then resume with:");
+    say(resumeHint(cwd, runId));
+    return finish({ code: 0, runId, exit, costUsd: session.costUsd });
   }
 
   if (exit.kind === "STALLED") {
     const board = planCycle(gates.predicates, gates.workList);
-    line(
+    say(
       `Predicates that did not move: ${board.failing
         .map((id) => `${id} ${PREDICATE_NAMES[id]}`)
         .join(", ")}`,
     );
-    line(workLines(board.groups));
-    return 1;
+    say(workLines(board.groups));
+    return finish({ code: 1, runId, exit, costUsd: session.costUsd });
   }
 
   const confirmed = snapshot.findings.filter(
@@ -292,11 +412,11 @@ export const runOperation = async (
       finding.status === "confirmed-defect" ||
       finding.status === "confirmed-but-known",
   );
-  line(`Units accepted: ${snapshot.unitCounts["accepted"] ?? 0}`);
-  line(`Defects confirmed and still red: ${confirmed.length}`);
+  say(`Units accepted: ${snapshot.unitCounts["accepted"] ?? 0}`);
+  say(`Defects confirmed and still red: ${confirmed.length}`);
   for (const finding of confirmed) {
-    line(`  - ${finding.findingKey}: ${finding.title}`);
+    say(`  - ${finding.findingKey}: ${finding.title}`);
   }
-  line(`Waivers signed: ${snapshot.waivers.length}`);
-  return 0;
+  say(`Waivers signed: ${snapshot.waivers.length}`);
+  return finish({ code: 0, runId, exit, costUsd: session.costUsd });
 };
