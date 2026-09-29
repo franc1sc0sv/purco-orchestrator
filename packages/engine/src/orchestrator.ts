@@ -633,6 +633,7 @@ export class Orchestrator {
         ticket: this.config.ticket,
         base: "dev",
         scope: this.config.testScope,
+        depth: this.config.testDepth,
         targets: this.config.testTargets,
         focus: step.fix ? `Confirm the fixes for:\n${step.fix}` : this.config.testFocus,
         fresh: Boolean(step.attempt && step.attempt > 1),
@@ -667,7 +668,7 @@ export class Orchestrator {
     const done = exit?.kind === "DONE";
     const summary = forge.result.refusal
       ? `refused: ${forge.result.refusal}`
-      : `Test Forge run ${forge.result.runId ?? "-"} (${forge.scope}) ${exit?.kind ?? "INTERRUPTED"}: ${exit?.reason ?? "no exit recorded"}. ${forge.defects.length} confirmed defect(s) for the builder.`;
+      : `Test Forge run ${forge.result.runId ?? "-"} (${forge.scope}, ${this.config.testDepth}) ${exit?.kind ?? "INTERRUPTED"}: ${exit?.reason ?? "no exit recorded"}. ${forge.defects.length} confirmed defect(s) for the builder.`;
     return this.recordForgeOutcome(step, label, done ? "done" : "escalated", summary, forge.result.costUsd, []);
   }
 

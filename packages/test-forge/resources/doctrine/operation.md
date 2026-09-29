@@ -17,6 +17,16 @@ The human is Captain Lasky. How you reach him depends on the host, and your cycl
 - **With an `ask` tool** (the PurCo orchestrator): call `ask` with one precise question, the options as (a), (b), (c), and what each costs. It blocks until he answers, and the run continues. Waivers and equivalence signatures go the same way, and you record them under his name only after he answers.
 - **Without one** (the headless runner): end the run BLOCKED with the same one question, as the loop section below describes.
 
+## Depth
+
+A run is opened at one of two depths, and the opening prompt names it.
+
+- **full**: all eight phases.
+- **quick**: phases 1 to 5 and the debrief. Phase 6 (ASSAULT) and phase 7 (PRUNE) do not run, so no
+  mutant is generated and no test is pruned. `gates_evaluate` records D5 MUTATION and D6 VALUE as
+  skipped: true without measurement. The debrief states that the suite was not proved against
+  mutants, so nobody reads a quick run as a full one.
+
 ## Time
 
 Each cycle prompt ends with `elapsed <n>s`, the time since the operation started. Use it to pace

@@ -34,6 +34,8 @@ purco-orchestrate monitor [--port <n>]
   --targets <text>     test workflow: the use cases or files to test
   --focus <text>       test workflow: what the operation must prove, one line each
   --scope <name>       test step: backend or frontend, default from the changed files
+  --test-depth <name>  quick or full. Quick skips mutation and pruning. Default:
+                       quick in the ticket workflow, full in the test workflow
   --worktree <path>    default: the worktree whose branch matches the ticket
   --model <id>         override every role's model; default is per role
   --budget <usd>       abort the run when the total cost passes this
@@ -198,12 +200,19 @@ const main = async (): Promise<void> => {
       flags.scope === "backend" || flags.scope === "frontend"
         ? flags.scope
         : undefined,
+    testDepth:
+      flags["test-depth"] === "quick" || flags["test-depth"] === "full"
+        ? flags["test-depth"]
+        : workflow === "test"
+          ? "full"
+          : "quick",
   };
 
   process.stderr.write(
     [
       `ticket    ${config.ticket}`,
       `workflow  ${config.workflow}`,
+      `tests     Test Forge at ${config.testDepth} depth`,
       `worktree  ${config.worktree}`,
       `pack      ${config.contextPack}`,
       `phases    ${config.phases.join(" > ")}`,

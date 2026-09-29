@@ -34,6 +34,11 @@ Add Docker Desktop's binary directory to the shell `PATH` if it is missing,
 to boot. Restart the Claude Code session after the registration and after every pull, because a
 running server keeps the code it loaded.
 
+A run has a depth. `full` runs all eight phases. `quick` skips phase 6 (ASSAULT) and phase 7
+(PRUNE), and records D5 and D6 as skipped, not as measured. Every cycle writes its cost to the
+`usage_records` table: tokens per post, and each model's real cost from the SDK split across the
+posts that used it by token weight. The runner prints the cost per post at the end of a run.
+
 Full detail, and what to do when something goes wrong, is in [SETUP.md](SETUP.md).
 
 **Three things to know before your first run.** The PurCo rules import at their real severities —

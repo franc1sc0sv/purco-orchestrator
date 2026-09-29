@@ -21,6 +21,7 @@ Options
   --run <id>          Resume this run id instead of opening or reusing one.
   --new               Open a new run even when an open one exists.
   --approve-plan      Captain Lasky has read the plan and approves spawning.
+  --depth <name>      full (default) | quick. Quick skips mutation and pruning.
   --help              This text.
 
 The host never stops for cost. It stops on DONE, BLOCKED or STALLED.`;
@@ -54,6 +55,7 @@ const main = async (): Promise<number> => {
       run: { type: "string" },
       new: { type: "boolean" },
       "approve-plan": { type: "boolean" },
+      depth: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -61,6 +63,11 @@ const main = async (): Promise<number> => {
   if (values.help === true) {
     line(USAGE);
     return 0;
+  }
+
+  const depth = values.depth ?? "full";
+  if (depth !== "full" && depth !== "quick") {
+    throw new Error(`--depth must be full or quick but was "${depth}"`);
   }
 
   const focusFile = values["focus-file"];
@@ -78,6 +85,7 @@ const main = async (): Promise<number> => {
     runId: runIdOf(values.run),
     openNew: values.new === true,
     approvePlan: values["approve-plan"] === true,
+    depth,
   });
   return result.code;
 };

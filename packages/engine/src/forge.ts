@@ -23,6 +23,7 @@ export type ForgeInput = {
   ticket: string;
   base: string;
   scope?: ForgeScope;
+  depth: "full" | "quick";
   targets?: string;
   focus?: string;
   fresh: boolean;
@@ -143,6 +144,7 @@ export const runForge = async (input: ForgeInput): Promise<ForgeOutcome> => {
     runId: previous,
     openNew: previous === null,
     approvePlan: false,
+    depth: input.depth,
     host: {
       line: log,
       askHuman: input.askHuman,

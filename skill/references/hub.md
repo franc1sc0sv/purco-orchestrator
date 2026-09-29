@@ -76,6 +76,9 @@ node $ENGINE/bin/purco-orchestrate.js $TICKET \
 - `--budget` is the ceiling for the whole run, lead included. Take it from the last
   `report.md` of a similar ticket; the cost table there names each step.
 - `--dry-run` prints the steps and the gates and costs nothing.
+- `--test-depth quick|full` sets how deep the Test Forge step goes. `quick` (the ticket default)
+  skips mutation and pruning, which are the longest phases; `full` (the default for
+  `--workflow test`) runs all eight phases. Say which one ran when you report the result.
 - Do not pass `--model`. Every role names its own model, all Opus 5.5 or Sonnet 5.5.
 
 ## Move 4: route every item
@@ -122,7 +125,9 @@ moving.
 node $ENGINE/bin/purco-spike.js status --db $DB --run $RUN
 ```
 
-Report the step table, the cost and why the run ended. A step that ended `escalated` or a run that
+Report the step table, the cost and why the run ended. When a Test Forge step ran, the end of
+`$GAF/orchestrator-runs/$RUN/forge.log` holds its cost per post (`COST BY POST`); report the top
+three posts. A step that ended `escalated` or a run that
 `stopped` did not finish: say what stopped it, from the status output, and what the user can
 change before a relaunch with `--resume`.
 

@@ -1,5 +1,6 @@
 import { doneVectorOf, gateRows, workList } from "../../domain/gates/gates.ts";
 import { evaluatePredicates } from "../../domain/gates/predicates.ts";
+import { one, openDb } from "../../infrastructure/db/connection.ts";
 import { resolveProject } from "../../infrastructure/project.ts";
 import { flakeProbe } from "../execution/flake-probe.ts";
 import { gateStatic } from "../execution/gate-static.ts";
@@ -15,8 +16,23 @@ import {
 import type {
   DoneVector,
   GateResult,
+  PredicateResult,
   WorkItem,
 } from "test-forge-contracts/gates";
+
+export const QUICK_SKIPPED = ["d5", "d6"] as const;
+
+const SKIPPED: PredicateResult = {
+  value: true,
+  indeterminate: null,
+  checked: [],
+  passed: [],
+  failed: [],
+};
+
+const runDepth = (runId: number): string =>
+  one<{ depth: string }>(openDb(), "SELECT depth FROM runs WHERE id = ?", [runId])
+    ?.depth ?? "full";
 
 export type GateCommands = {
   test?: string;
@@ -64,6 +80,8 @@ export type GatesEvaluation = {
   workList: WorkItem[];
   allTrue: boolean;
   stalled: boolean;
+  depth: string;
+  skipped: string[];
 };
 
 export const evaluateGates = async ({
@@ -177,9 +195,13 @@ export const evaluateGates = async ({
     }
   }
 
-  const table = evaluatePredicates(
+  const depth = runDepth(runId);
+  const measured = evaluatePredicates(
     await gatherEvidence({ cwd, runId, projectKey, rootPath }),
   );
+  const skipped: string[] = depth === "quick" ? [...QUICK_SKIPPED] : [];
+  const table =
+    depth === "quick" ? { ...measured, d5: SKIPPED, d6: SKIPPED } : measured;
   const predicates = doneVectorOf(table);
   const recorded = await passRecord({ cwd, runId, predicates });
 
@@ -193,5 +215,7 @@ export const evaluateGates = async ({
     workList: workList(table),
     allTrue: recorded.allGreen,
     stalled: recorded.stalled,
+    depth,
+    skipped,
   };
 };

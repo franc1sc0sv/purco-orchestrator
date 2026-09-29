@@ -4,16 +4,22 @@ import { requireEnum } from "./ledger-input.ts";
 import { SCOPES } from "test-forge-contracts/project";
 import type { Scope } from "test-forge-contracts/project";
 
+export const RUN_DEPTHS = ["full", "quick"] as const;
+
+export type RunDepth = (typeof RUN_DEPTHS)[number];
+
 export type RunStartInput = {
   cwd: string;
   focus?: string | undefined;
   scope: Scope;
+  depth?: RunDepth | undefined;
 };
 
 export type RunStartResult = {
   projectKey: string;
   runId: number;
   scope: Scope;
+  depth: RunDepth;
   focus: string;
   focusItems: number;
   startedAt: string;
@@ -23,17 +29,19 @@ export const runStart = async ({
   cwd,
   focus,
   scope,
+  depth = "full",
 }: RunStartInput): Promise<RunStartResult> => {
   const db = openDb();
   const { projectKey } = await resolveProject(cwd);
   requireEnum(scope, SCOPES, "scope");
+  requireEnum(depth, RUN_DEPTHS, "depth");
   const focusText = focus ?? "";
 
   return tx(db, (txScope) => {
     const inserted = run(
       txScope.db,
-      `INSERT INTO runs (project_key, focus, scope) VALUES (?, ?, ?)`,
-      [projectKey, focusText, scope],
+      `INSERT INTO runs (project_key, focus, scope, depth) VALUES (?, ?, ?, ?)`,
+      [projectKey, focusText, scope, depth],
     );
     const runId = Number(inserted.lastInsertRowid);
 
@@ -57,6 +65,7 @@ export const runStart = async ({
       projectKey,
       runId,
       scope,
+      depth,
       focus: focusText,
       focusItems,
       startedAt: started?.started_at ?? "",

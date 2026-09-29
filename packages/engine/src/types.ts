@@ -164,6 +164,7 @@ export type RunConfig = {
   testTargets?: string;
   testFocus?: string;
   testScope?: "backend" | "frontend";
+  testDepth: "full" | "quick";
 };
 
 export const SITE_AXES = ["A", "B", "C", "D", "E"] as const;

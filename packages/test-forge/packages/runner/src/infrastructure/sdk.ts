@@ -38,9 +38,96 @@ export type CycleRequest = {
   env?: Record<string, string | undefined> | undefined;
 };
 
+export type PostTokens = {
+  callsign: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+};
+
+export type ModelCost = {
+  model: string;
+  costUsd: number;
+};
+
 export type CycleOutcome = {
   usage: CycleUsage;
   resultText: string;
+  posts: PostTokens[];
+  modelCosts: ModelCost[];
+};
+
+export const MAIN_THREAD = "palmer";
+
+type ApiUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+};
+
+type ApiMessage = { id?: string; model?: string; usage?: ApiUsage };
+
+const tokenTracker = () => {
+  const callsignOf = new Map<string, string>();
+  const seen = new Set<string>();
+  const posts = new Map<string, PostTokens>();
+
+  const account = (
+    message: Extract<SDKMessage, { type: "assistant" }>
+  ): void => {
+    const inner = message.message as unknown as ApiMessage;
+    if (message.parent_tool_use_id === null) {
+      for (const block of message.message.content) {
+        if (
+          block.type === "tool_use" &&
+          (block.name === "Agent" || block.name === "Task")
+        ) {
+          callsignOf.set(block.id, stringAt(block.input, "subagent_type") || "unknown");
+        }
+      }
+    }
+    if (inner.usage === undefined || inner.id === undefined || seen.has(inner.id)) {
+      return;
+    }
+    seen.add(inner.id);
+    const callsign =
+      message.parent_tool_use_id === null
+        ? MAIN_THREAD
+        : callsignOf.get(message.parent_tool_use_id) ?? "unknown";
+    const model = inner.model ?? "unknown";
+    const key = `${callsign}|${model}`;
+    const current = posts.get(key) ?? {
+      callsign,
+      model,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    posts.set(key, {
+      ...current,
+      inputTokens: current.inputTokens + (inner.usage.input_tokens ?? 0),
+      outputTokens: current.outputTokens + (inner.usage.output_tokens ?? 0),
+      cacheReadTokens:
+        current.cacheReadTokens + (inner.usage.cache_read_input_tokens ?? 0),
+      cacheWriteTokens:
+        current.cacheWriteTokens + (inner.usage.cache_creation_input_tokens ?? 0),
+    });
+  };
+
+  return { account, posts: (): PostTokens[] => [...posts.values()] };
+};
+
+const modelCostsOf = (message: SDKResultMessage): ModelCost[] => {
+  const usage = (message as { modelUsage?: Record<string, { costUSD?: number }> })
+    .modelUsage;
+  return Object.entries(usage ?? {}).map(([model, entry]) => ({
+    model,
+    costUsd: entry.costUSD ?? 0,
+  }));
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -128,15 +215,19 @@ export const runCycle = async ({
         },
       },
       hooks: standingOrders(projectRoot),
+      forwardSubagentText: true,
     },
   });
 
   let usage: CycleUsage = { ...EMPTY_USAGE };
   let resultText = "";
+  let modelCosts: ModelCost[] = [];
+  const tokens = tokenTracker();
 
   for await (const message of stream) {
     if (message.type === "assistant") {
-      emitAssistant(message, onEvent);
+      tokens.account(message);
+      if (message.parent_tool_use_id === null) emitAssistant(message, onEvent);
       continue;
     }
     if (message.type === "system" && message.subtype === "init") {
@@ -149,6 +240,7 @@ export const runCycle = async ({
     }
     if (message.type === "result") {
       usage = usageOf(message);
+      modelCosts = modelCostsOf(message);
       if (message.subtype === "success") resultText = message.result;
       else
         onEvent({
@@ -158,5 +250,5 @@ export const runCycle = async ({
     }
   }
 
-  return { usage, resultText };
+  return { usage, resultText, posts: tokens.posts(), modelCosts };
 };

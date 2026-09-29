@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { planCycle } from "../domain/cycle.ts";
 import type { ExitDecision } from "../domain/exit.ts";
 import { decideExit } from "../domain/exit.ts";
+import { allocateUsage } from "../domain/usage.ts";
 import { buildAgents, findBrief } from "../infrastructure/briefs.ts";
 import { line as consoleLine } from "../infrastructure/console.ts";
 import {
@@ -33,6 +34,12 @@ import { rulesFor } from "test-forge-mcp-server/src/application/codex/rules-for.
 import { evaluateGates } from "test-forge-mcp-server/src/application/gates/evaluate.ts";
 import { runReopen } from "test-forge-mcp-server/src/application/ledger/run-reopen.ts";
 import { runStart } from "test-forge-mcp-server/src/application/ledger/run-start.ts";
+import type { RunDepth } from "test-forge-mcp-server/src/application/ledger/run-start.ts";
+import {
+  usageByModel,
+  usageByPost,
+  usageRecord,
+} from "test-forge-mcp-server/src/application/ledger/usage-record.ts";
 import { state } from "test-forge-mcp-server/src/application/ledger/state.ts";
 import { resolveProject } from "test-forge-mcp-server/src/infrastructure/project.ts";
 
@@ -55,6 +62,7 @@ export type OperationRequest = {
   runId: number | null;
   openNew: boolean;
   approvePlan: boolean;
+  depth?: RunDepth;
   host?: OperationHost;
 };
 
@@ -110,6 +118,7 @@ const resolveRun = async (
     cwd: request.cwd,
     focus: request.focus,
     scope: request.scope,
+    depth: request.depth ?? "full",
   });
   return {
     runId: started.runId,
@@ -236,7 +245,17 @@ export const runOperation = async (
 
   const finish = (result: OperationResult): OperationResult => {
     process.off("SIGINT", onSigint);
-    return result;
+    const posts = usageByPost(runId);
+    if (posts.length > 0) {
+      rule("COST BY POST");
+      for (const post of posts) {
+        say(
+          `${post.callsign.padEnd(18)} ${post.model.padEnd(20)} $${post.costUsd.toFixed(4)}  out ${post.outputTokens}  in ${post.inputTokens}  cache ${post.cacheReadTokens}`,
+        );
+      }
+    }
+    const recorded = posts.reduce((sum, post) => sum + post.costUsd, 0);
+    return { ...result, costUsd: recorded > 0 ? recorded : result.costUsd };
   };
 
   while (exit === null && !interrupted) {
@@ -256,6 +275,7 @@ export const runOperation = async (
             cwd,
             approved,
             hasAsk,
+            depth: gates.depth,
           })
         : cyclePrompt(
             {
@@ -272,6 +292,7 @@ export const runOperation = async (
               units: snapshot.units,
               hasAsk,
               elapsedSeconds: Math.round((Date.now() - startedAt) / 1000),
+              skipped: gates.skipped,
             },
             gates.predicates,
             assignment,
@@ -303,6 +324,18 @@ export const runOperation = async (
       sessionId: session.sessionId,
     };
     saveSession(key, session);
+
+    await usageRecord({
+      cwd,
+      runId,
+      cycle,
+      rows: allocateUsage({
+        posts: outcome.posts,
+        modelCosts: outcome.modelCosts,
+        recordedByModel: usageByModel(runId),
+        resumed: !opening,
+      }),
+    });
 
     snapshot = await state({ cwd, runId });
     gates = await evaluateGates({ cwd, runId });

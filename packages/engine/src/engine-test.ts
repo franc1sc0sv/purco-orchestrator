@@ -4,6 +4,11 @@ import path from "node:path";
 import { AgentScratch } from "./agent-scratch.ts";
 import { phaseGate } from "./gates.ts";
 import { Journal } from "./journal.ts";
+import {
+  allocateUsage,
+  cycleCost,
+  modelKey,
+} from "test-forge-runner/src/domain/usage.ts";
 import { runGrill } from "./grill.ts";
 import { validateDecision } from "./lead.ts";
 import { briefSteps, planSteps, stepKey, stepLabel } from "./plan.ts";
@@ -209,6 +214,49 @@ await runGrill({
   prune: async () => ({ settled: [], reason: "" }),
 });
 check("a resumed grill asks nothing already recorded", regrilled.length === 0);
+
+section("the Test Forge cost split");
+
+const post = (callsign: string, model: string, output: number) => ({
+  callsign,
+  model,
+  inputTokens: 0,
+  outputTokens: output,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+});
+const split = allocateUsage({
+  posts: [
+    post("palmer", "claude-opus-5-5-20260801", 100),
+    post("carter-a259", "claude-opus-5-5", 300),
+    post("locke", "claude-sonnet-5-5", 50),
+  ],
+  modelCosts: [
+    { model: "claude-opus-5-5", costUsd: 4 },
+    { model: "claude-sonnet-5-5", costUsd: 1 },
+  ],
+  recordedByModel: new Map(),
+  resumed: false,
+});
+const costOf = (callsign: string): number =>
+  split.find((row) => row.callsign === callsign)?.costUsd ?? -1;
+check("a dated model id matches its cost entry", modelKey("claude-opus-5-5-20260801") === "claude-opus-5-5");
+check("opus cost splits by token weight", Math.abs(costOf("palmer") - 1) < 1e-9 && Math.abs(costOf("carter-a259") - 3) < 1e-9);
+check("sonnet cost goes to its only post", Math.abs(costOf("locke") - 1) < 1e-9);
+check(
+  "the split adds up to the reported cost",
+  Math.abs(split.reduce((sum, row) => sum + row.costUsd, 0) - 5) < 1e-9,
+);
+check("a resumed cycle pays only the new cost", cycleCost(7, 4, true) === 3);
+check("a resumed total below the record pays nothing", cycleCost(3, 4, true) === 0);
+check("a fresh cycle pays its full cost", cycleCost(3, 4, false) === 3);
+const orphan = allocateUsage({
+  posts: [],
+  modelCosts: [{ model: "claude-sonnet-5-5", costUsd: 0.2 }],
+  recordedByModel: new Map(),
+  resumed: false,
+});
+check("cost with no post is kept under host", orphan[0]?.callsign === "host" && orphan[0].costUsd === 0.2);
 
 section("the plan gate");
 

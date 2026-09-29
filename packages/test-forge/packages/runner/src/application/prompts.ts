@@ -25,6 +25,7 @@ export type CycleFacts = {
   units: readonly UnitSummary[];
   hasAsk: boolean;
   elapsedSeconds: number;
+  skipped: readonly string[];
 };
 
 export type OpeningFacts = {
@@ -37,6 +38,7 @@ export type OpeningFacts = {
   cwd: string;
   approved: boolean;
   hasAsk: boolean;
+  depth: string;
 };
 
 export const vectorLine = (vector: DoneVector): string =>
@@ -78,6 +80,13 @@ const unitLines = (units: readonly UnitSummary[]): string =>
         )
         .join("\n");
 
+const depthLine = (depth: string): string =>
+  depth === "quick"
+    ? `Depth: quick. Run phases 1 to 5 and the debrief. Do not run phase 6 (ASSAULT) or phase 7
+(PRUNE): the host records D5 MUTATION and D6 VALUE as skipped, not as measured, and the debrief
+must say so.`
+    : "Depth: full. Run all eight phases.";
+
 const humanChannel = (hasAsk: boolean): string =>
   hasAsk
     ? `Captain Lasky is reachable while a cycle runs: call the \`ask\` tool with one precise question,
@@ -98,8 +107,11 @@ export const openingPrompt = ({
   cwd,
   approved,
   hasAsk,
+  depth,
 }: OpeningFacts): string => `You are Commander Sarah Palmer, running one Test Forge operation. The operation procedure is in
 your system prompt, after your post.
+
+${depthLine(depth)}
 
 ${humanChannel(hasAsk)}
 
@@ -180,7 +192,11 @@ False predicates: ${
   assignment.failing.length > 0 ? assignment.failing.join(", ") : "none"
 }
 Passes recorded: ${facts.passes}${
-  facts.passStalled ? " - the last two passes carry an IDENTICAL vector" : ""
+  facts.passStalled ? " - the last two passes carry an identical vector" : ""
+}${
+  facts.skipped.length > 0
+    ? `\nSkipped at quick depth, recorded as true without measurement: ${facts.skipped.join(", ").toUpperCase()}`
+    : ""
 }
 
 Work list:

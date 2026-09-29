@@ -18,7 +18,10 @@ node bin/purco-orchestrate.js 3222 --workflow test --targets "<targets>" --focus
 
 Options: `--workflow`, `--phases`, `--worktree`, `--model`, `--budget`, `--resume`, `--max-turns`,
 `--dry-run`, `--no-write`, `--non-interactive`, `--ask-human`, `--run-id`, `--mailbox-db`,
-`--config-dir`, `--targets`, `--focus`, `--scope`, `--check-mcp`.
+`--config-dir`, `--targets`, `--focus`, `--scope`, `--test-depth`, `--check-mcp`.
+
+`--test-depth quick` (the ticket default) runs Test Forge without mutation and pruning;
+`--test-depth full` (the default for `--workflow test`) runs all eight phases.
 
 **A detached run needs `--mailbox-db`.** Without it a human question falls back to readline on
 stdin, which no background process can answer. The CLI refuses to start when stdin is not a
