@@ -173,7 +173,7 @@ export class Orchestrator {
   private agentEnv(): Record<string, string | undefined> {
     return {
       ...process.env,
-      CLAUDE_CONFIG_DIR: this.config.configDir,
+      ...(this.config.configDir && { CLAUDE_CONFIG_DIR: this.config.configDir }),
       MCP_TIMEOUT: MCP_STARTUP_TIMEOUT_MS,
       MCP_TOOL_TIMEOUT: MCP_TOOL_TIMEOUT_MS,
     };

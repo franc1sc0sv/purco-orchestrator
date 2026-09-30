@@ -49,7 +49,7 @@ purco-orchestrate monitor [--port <n>]
   --mailbox-db <file>  route human questions through the SQLite mailbox;
                        required whenever stdin is not a terminal
   --run-id <id>        pin the run id, so census, questions and phases share it
-  --config-dir <path>  Claude config profile, default CLAUDE_CONFIG_DIR
+  --config-dir <path>  Claude config profile, default CLAUDE_CONFIG_DIR or ~/.claude
   --check-mcp          probe linear, playwright and postgres, then exit
 
 monitor serves a live page for every run on disk, default port 4317.
@@ -189,10 +189,7 @@ const main = async (): Promise<void> => {
     mailboxDb:
       typeof flags["mailbox-db"] === "string" ? flags["mailbox-db"] : undefined,
     configDir:
-      typeof flags["config-dir"] === "string"
-        ? flags["config-dir"]
-        : (process.env.CLAUDE_CONFIG_DIR ??
-          path.join(process.env.HOME ?? "", ".claude-work")),
+      typeof flags["config-dir"] === "string" ? flags["config-dir"] : undefined,
     testTargets:
       typeof flags.targets === "string" ? flags.targets : undefined,
     testFocus: typeof flags.focus === "string" ? flags.focus : undefined,

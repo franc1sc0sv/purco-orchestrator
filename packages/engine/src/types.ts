@@ -159,7 +159,7 @@ export type RunConfig = {
   autoApproveWrites: boolean;
   nonInteractive: boolean;
   askHuman: boolean;
-  configDir: string;
+  configDir?: string;
   mailboxDb?: string;
   testTargets?: string;
   testFocus?: string;

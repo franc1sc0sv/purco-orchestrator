@@ -28,7 +28,7 @@ const ask = async (
   prompt: string,
   servers: Record<string, McpServerConfig>,
   allowedTools: string[],
-  configDir: string,
+  configDir: string | undefined,
 ): Promise<{ answer: string; cost: number }> => {
   let answer = "";
   let cost = 0;
@@ -40,7 +40,7 @@ const ask = async (
       settingSources: [],
       env: {
         ...process.env,
-        CLAUDE_CONFIG_DIR: configDir,
+        ...(configDir && { CLAUDE_CONFIG_DIR: configDir }),
         MCP_TIMEOUT: MCP_STARTUP_TIMEOUT_MS,
         MCP_TOOL_TIMEOUT: MCP_TOOL_TIMEOUT_MS,
       },
@@ -64,7 +64,7 @@ const ask = async (
 
 export const checkMcp = async (
   ticket: string,
-  configDir: string,
+  configDir: string | undefined,
 ): Promise<number> => {
   let total = 0;
   let failures = 0;
@@ -75,7 +75,7 @@ export const checkMcp = async (
     );
   };
 
-  process.stdout.write(`config dir  ${configDir}\n`);
+  process.stdout.write(`config dir  ${configDir ?? "default"}\n`);
   process.stdout.write(`project     ${PURCO_WEB_ROOT}\n`);
   process.stdout.write(`linear key  ${linearKeySource()}\n\n`);
 
