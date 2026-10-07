@@ -56,6 +56,7 @@ export type TicketSummary = {
   tokensOut: number;
   liveAgents: number;
   openItemCount: number;
+  recorded: boolean;
   unseenAlerts: Alert[];
   activeRun: string | null;
   heartbeatAgeSec: number | null;

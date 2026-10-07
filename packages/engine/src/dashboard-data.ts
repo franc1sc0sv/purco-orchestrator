@@ -58,6 +58,7 @@ export type TicketSummary = {
   tokensOut: number;
   liveAgents: number;
   openItemCount: number;
+  recorded: boolean;
   unseenAlerts: StoredAlert[];
   activeRun: string | null;
   heartbeatAgeSec: number | null;
@@ -237,6 +238,7 @@ const readSummary = (ticket: string, store: Store, nowMs: number): TicketSummary
     tokensOut: cost.tokensOut,
     liveAgents: liveNow.length,
     openItemCount: attempt(() => store.openHumanItems().length, 0),
+    recorded: steps.length > 0,
     unseenAlerts: attempt(() => store.alerts(ticket, true), []).slice(-20),
     activeRun: alive ? (lease?.runId ?? null) : null,
     heartbeatAgeSec: heartbeatMs === undefined ? null : Math.round(heartbeatMs / 1000),

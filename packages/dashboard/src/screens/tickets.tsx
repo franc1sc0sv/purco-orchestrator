@@ -19,8 +19,9 @@ const COLUMNS = "grid grid-cols-[8rem_3rem_8rem_minmax(18rem,1fr)_5rem_5rem_4rem
 
 const TABS: { value: TicketFilter; label: string; empty: string }[] = [
   { value: "live", label: "Live", empty: "No live tickets" },
+  { value: "failed", label: "Failed", empty: "No failed tickets" },
   { value: "completed", label: "Completed", empty: "No completed tickets" },
-  { value: "other", label: "Other", empty: "No other tickets" },
+  { value: "not-recorded", label: "Not recorded", empty: "No tickets without recorded steps" },
   { value: "all", label: "All", empty: "No tickets" },
 ];
 

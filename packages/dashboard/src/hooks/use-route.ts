@@ -19,7 +19,8 @@ const parse = (hash: string): Route => {
   if (parts[0] === "history") return { name: "history" };
   if (parts[0] === "usage") return { name: "usage" };
   const query = new URLSearchParams(hash.split("?")[1] ?? "").get("filter");
-  return { name: "tickets", filter: isTicketFilter(query) ? query : DEFAULT_TICKET_FILTER };
+  const requested = query === "other" ? "not-recorded" : query;
+  return { name: "tickets", filter: isTicketFilter(requested) ? requested : DEFAULT_TICKET_FILTER };
 };
 
 export const useRoute = (): Route => {
