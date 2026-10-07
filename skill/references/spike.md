@@ -50,7 +50,6 @@ node $ENGINE/bin/purco-orchestrate.js $TICKET \
   --workflow spike \
   --run-id $RUN \
   --mailbox-db $DB \
-  --budget <usd> \
   --worktree $WT
 ```
 

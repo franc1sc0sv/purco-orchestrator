@@ -192,7 +192,21 @@ with its own `TICKET_CTX` so the breach check can see it.
 ```
 
 It refuses without an accepted codex for the scope — run `/purco rules` first
-if there is none. Use `/purco board` to see where the aspects stand.
+if there is none. In an orchestrated run the engine runs the stages itself:
+
+1. map: one mapper writes the unit contract, the coverage matrix, the effect
+   closure and one test file per unit. The user approves the test plan.
+2. write: one test author per file, side by side; each runs only its own file.
+3. check: `gates_evaluate` runs types, lint, the suite and the flake probe.
+4. inspect: one inspector per file judges each applicable rule.
+5. verify: one defect verifier per red test; a defect skeptic attacks each
+   confirmed defect.
+6. mutate (full depth): mutants on the changed lines only; one survivor
+   analyst per file, one equivalence hunter per file with claims.
+7. prune (full depth): tests with no unique kill are deleted or exempted.
+
+Code routes every work item to the file that owns it; the lead answers what
+code cannot, and only the user signs waivers and equivalences.
 
 Rules that come from this repo's own corrections:
 
@@ -303,6 +317,9 @@ Then, in one flow:
 
 If a quality gate rewrites files during commit, the user re-stages — you never
 touch the index.
+
+The videos in `verify/videos/` (one per acceptance criterion, plus flag ON and
+flag OFF when a flag gates the change) are uploaded and embedded in the PR body.
 
 Done: one commit, pushed, PR open against the right base.
 

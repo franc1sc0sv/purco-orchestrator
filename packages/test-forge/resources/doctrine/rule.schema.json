@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://test-forge.local/doctrine/rule.schema.json",
   "title": "Test Forge doctrine rule",
-  "description": "A rule is a detection procedure, not a sentence. Every field that a human reads has a machine counterpart that Roland can execute.",
+  "description": "A rule is a detection procedure, not a sentence. Every field that a human reads has a machine counterpart that the test-forge tools can execute.",
   "type": "object",
   "additionalProperties": false,
   "required": [

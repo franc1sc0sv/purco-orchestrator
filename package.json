@@ -5,10 +5,11 @@
   "type": "module",
   "workspaces": [
     "packages/engine",
+    "packages/dashboard",
     "packages/test-forge/packages/*"
   ],
   "scripts": {
-    "check": "npm run typecheck -w purco-engine && tsc --noEmit -p packages/test-forge/tsconfig.base.json",
+    "check": "npm run typecheck -w purco-engine && npm run typecheck -w purco-dashboard && tsc --noEmit -p packages/test-forge/tsconfig.base.json",
     "engine-test": "npm run engine-test -w purco-engine",
     "hub-test": "npm run hub-test -w purco-engine",
     "smoke": "npm run smoke -w purco-engine",

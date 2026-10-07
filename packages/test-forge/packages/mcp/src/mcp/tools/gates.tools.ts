@@ -110,7 +110,7 @@ export const registerGatesTools = (server: McpServer): void => {
         "",
         "D10 ESCALATION is false while any escalation raised on the run is still open, and it is its own gate, gate 8, so it is visible rather than folded into another gate. Nothing else can turn it true: an open escalation is closed only by escalation_resolve, which demands a named author and a written reason, and a run whose rules are known to be wrong therefore cannot report every gate green at the same moment. Read the open list with escalation_open.",
         "",
-        "D4 VERIFIED does not require a green suite. A red test whose defect carries a Noble Team verdict of confirmed-defect or confirmed-but-known, or a finding recorded at that status, or a signed waiver, counts as accounted for and D4 stays true: a confirmed defect may remain red and does not block the run. What makes D4 false is an unverified red - a failing test that no agent has judged. Record that judgement with ledger_verdict_record before evaluating again.",
+        "D4 VERIFIED does not require a green suite. A red test whose defect carries a defect verifier verdict of confirmed-defect or confirmed-but-known, or a finding recorded at that status, or a signed waiver, counts as accounted for and D4 stays true: a confirmed defect may remain red and does not block the run. What makes D4 false is an unverified red - a failing test that no agent has judged. Record that judgement with ledger_verdict_record before evaluating again.",
         "",
         "Args:",
         "- cwd (string): absolute path inside the project the run belongs to.",

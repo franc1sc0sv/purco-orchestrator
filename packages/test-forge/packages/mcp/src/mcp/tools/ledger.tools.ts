@@ -133,7 +133,7 @@ const passRecordInput = z
           .optional(),
         d4: z
           .boolean()
-          .describe("VERIFIED: every red test carries a Noble Team verdict.")
+          .describe("VERIFIED: every red test carries a defect verifier verdict.")
           .optional(),
         d5: z
           .boolean()
@@ -178,7 +178,7 @@ const unitItem = z
       .describe("Test file this unit of work covers, one unit per file."),
     authorCallsign: z
       .string()
-      .describe("The Spartan who owns this file.")
+      .describe("The test author who owns this file.")
       .optional(),
     state: z
       .enum(UNIT_STATES)
@@ -529,7 +529,7 @@ export const registerLedgerTools = (server: McpServer): void => {
         "- cwd (string): absolute path inside the project.",
         "- runId (integer): run identifier.",
         "- filePath (string): the test file this unit covers.",
-        "- authorCallsign (string, optional): the Spartan who owns this file.",
+        "- authorCallsign (string, optional): the test author who owns this file.",
         "- state ('assigned' | 'drafted' | 'reviewed' | 'revised' | 'accepted' | 'abandoned', optional): where the unit stands.",
         "",
         "Returns: { projectKey: string, runId: number, unitId: number, filePath: string, authorCallsign: string, state: string }.",
@@ -1085,13 +1085,13 @@ export const registerLedgerTools = (server: McpServer): void => {
     {
       title: "Has this failed here before",
       description: [
-        "Indexed lookup on the finding fingerprint across every run of this project: has this failed before? Returns every prior occurrence with the run it came from, the verdicts reached on it, and any war game recorded under the same key.",
+        "Indexed lookup on the finding fingerprint across every run of this project: has this failed before? Returns every prior occurrence with the run it came from, and the verdicts reached on it.",
         "",
         "Args:",
         "- cwd (string): absolute path inside the project.",
         "- fingerprint (string): the finding key to look up.",
         "",
-        "Returns: { projectKey: string, fingerprint: string, known: boolean, occurrenceCount: number, lastStatus: string | null, lastSeenAt: string | null, occurrences: Array<{ findingId, runId, severity, title, location, status, createdAt, runFocus, runScope, runExit }>, verdicts: Array<{ verdictId, runId, agentCallsign, post, ruleId, verdict, createdAt }>, warGame: { scenarioId, squad, post, aspect, status, rootCause, createdAt } | null }.",
+        "Returns: { projectKey: string, fingerprint: string, known: boolean, occurrenceCount: number, lastStatus: string | null, lastSeenAt: string | null, occurrences: Array<{ findingId, runId, severity, title, location, status, createdAt, runFocus, runScope, runExit }>, verdicts: Array<{ verdictId, runId, agentCallsign, post, ruleId, verdict, createdAt }> }.",
         "",
         "Examples:",
         "- Use it before writing a finding, to decide between confirmed-defect and confirmed-but-known.",

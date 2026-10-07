@@ -46,6 +46,10 @@ Test Forge run 34 attempt 1 alone cost $20.87. Almost all of it was cache reads:
 - `--budget` counts every earlier phase of the same run id, so a resume needs the old spend plus the new allowance. Show the spent amount at launch.
 - 100 idle `crystaldba/postgres-mcp` containers held 6.1 GB of 8.2 GB Docker memory and killed LocalStack (exit 137), so 0 tests ran. Check Docker memory before a suite or mutation run.
 - An answer that starts with "approve" drops the notes after it. A progress note from Test Forge arrived as a plan gate.
+- PURCO-3467 (2026-10-05): `--model claude-sonnet-5-5` does not reach the Test Forge commander. `forge.ts` passes no model, so the commander ran on Opus for 285 turns (about 86M cache-read tokens) while the user had asked for Sonnet only. Pass `config.model` into `runOperation`.
+- PURCO-3467: `--budget` is checked only between steps. Test Forge cost reaches the store when the test step ends, so the ceiling never stops a running test step. Poll the forge session cost during the step.
+- PURCO-3467: `forge-run.json` is written only when the test step ends. After a crash mid-step, a `--resume` opens a new Test Forge run and plans again. Write the file as soon as the operation has a run id.
+- PURCO-3467: the lead answered a Test Forge escalation (45, RLS rule on the discard test) as "Lasky chose (a)" without a mailbox item reaching the hub.
 
 ## Follow-ups
 

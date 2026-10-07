@@ -24,7 +24,7 @@ const existingTestResolution = z
       ),
     verifiedBy: z
       .string()
-      .describe("Who verified the citation. Defaults to roland:citation-check.")
+      .describe("Who verified the citation. Defaults to test-forge:citation-check.")
       .optional(),
   })
   .strict();

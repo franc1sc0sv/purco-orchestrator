@@ -3,13 +3,12 @@ name: purco
 description: >
   One entry point for PurCo work driven by the purco-orchestrator engine: a whole ticket
   (intake, grill, plan, build, Test Forge, verify, static, review) run from one Claude Code
-  session, a feature-flag removal spike, a standalone Test Forge operation, the Test Forge
-  doctrine session, War Games replay and the Test Forge board. Use when starting, resuming or
-  checking a PURCO ticket, when asked for a ticket's status or next step, when starting or
-  resuming a spike or its census, when asked to write, harden or prove a test suite, when asked
-  to set up or revise testing rules or the codex, to replay War Games, or to show the testing
-  board. Replaces purco-ticket, purco-spike, test-forge, test-rules, test-replay and test-status.
-argument-hint: "<TICKET | status | next | <phase> | spike <TICKET> [verb] | test \"<targets>\" | rules | replay | board | ship | respond>"
+  session, a feature-flag removal spike, a standalone Test Forge operation, and the Test Forge
+  rules session. Use when starting, resuming or checking a PURCO ticket, when asked for a
+  ticket's status or next step, when starting or resuming a spike or its census, when asked to
+  write, harden or prove a test suite, or when asked to set up or revise testing rules or the
+  codex. Replaces purco-ticket, purco-spike, test-forge and test-rules.
+argument-hint: "<TICKET | status | next | <phase> | spike <TICKET> [verb] | test \"<targets>\" | rules | ship | respond>"
 metadata:
   category: user
   tags: [workflow, orchestrator, ticket, spike, test-forge, testing]
@@ -18,8 +17,8 @@ metadata:
 # /purco
 
 One engine, three workflows, one session. The engine at
-`/Users/franciscohernandez/projects/purco-projects/purco-orchestrator` runs the workers, keeps a
-lead session that remembers the whole run, and stops at the gates. This session is the hub: it
+`/Users/franciscohernandez/projects/purco-projects/purco-orchestrator` runs the workers, keeps
+all the memory in its store (the lead starts fresh for each decision), and stops at the gates. This session is the hub: it
 launches once, arms one watch, and puts every question, gate and signature in front of the user.
 The engine holds the memory, so this session stays small and never needs `/clear` to continue.
 
@@ -46,9 +45,7 @@ DB=$GAF/orchestrator.sqlite
 | `next`, or a phase name                | Run one phase in this session, per `references/phases.md`.                          |
 | `spike <TICKET> [verb]`                | The spike workflow. Read `references/spike.md`.                                     |
 | `test "<targets>" --focus "<lines>"`   | A standalone Test Forge operation through the hub. Read `references/hub.md`.       |
-| `rules [--scope backend\|frontend]`    | The Test Forge doctrine session, in this session. Read `references/test-rules.md`. |
-| `replay [scenario]`                    | War Games replay. Read `references/test-replay.md`.                                |
-| `board`                                | The Test Forge board, read-only. Read `references/test-status.md`.                 |
+| `rules [--scope backend\|frontend]`    | The Test Forge rules session, in this session. Read `references/test-rules.md`.    |
 | `ship`, `respond`                      | Commit, PR and PR feedback, in this session, per `references/phases.md`.           |
 
 ## The probe comes first
@@ -66,14 +63,14 @@ or `cp` yourself.
 
 ```
 LEVEL 0  the user + this session (the hub): QUESTION, GATE, SIGN, RUN_END
-LEVEL 1  the lead (Opus 5.5, one resumed session per run) + the engine (steps, gates, budget)
-LEVEL 2  workers, one fresh context per step: per phase, per brief, per cluster
-LEVEL 3  inside the test step only: Test Forge posts, dispatched from the gates work list
+LEVEL 1  the lead (Opus 5.5, one resumed session per run) + the engine (steps, gates, routing)
+LEVEL 2  workers, one fresh context per step: per phase, per brief, per cluster, per test file
 ```
 
 The engine owns the order of the steps; the lead owns judgment at the points the engine hands it.
-Workers that judge (tester, verifier, reviewer, every Test Forge post) never see the builder's
-reasoning, only files.
+Workers that judge (tester, verifier, reviewer, every Test Forge role) never see the builder's
+reasoning, only files. In the test step the engine runs the Test Forge stages in code and starts
+one worker for each unit of judgment work; there is no second orchestrator.
 
 ## The context pack
 
@@ -89,7 +86,8 @@ Every ticket owns `general-access-files/PURCO-XXXX/`. It is the durable memory o
 05-test-notes.md          only when the plain tester ran instead of Test Forge
 06-verification.md        live-app evidence
 07-review-findings.md     review output
-forge-run.json            the Test Forge run id for this ticket
+forge-run.json            the Test Forge run id for each scope
+forge/run-<id>/           the test contract, the unit list, waiver requests, mutation holes
 orchestrator-runs/<run>/  events, report.md, gates/, journal/, forge.log
 ```
 
@@ -99,7 +97,7 @@ The engine stops at these and posts a GATE item; the user answers through this s
 
 1. After intake: the intake card.
 2. After plan: the plan card. An explicit approval before any code.
-3. The Test Forge plan: the operation plan, with its agent count and cost estimate.
+3. The test plan: the units, the matrix rows, the closure radius and the agent count.
 4. Before any commit, in this session: "Ready to commit and push?" Applying review fixes is not
    permission to commit them.
 5. Before pushing to a base that is not `dev`.

@@ -1,6 +1,5 @@
 import { SERVER_NAME, SERVER_VERSION } from "../constants.ts";
 import { registerAnalysisTools } from "./tools/analysis.tools.ts";
-import { registerBoardTools } from "./tools/board.tools.ts";
 import { registerCampaignTools } from "./tools/campaign.tools.ts";
 import { registerClosureTools } from "./tools/closure.tools.ts";
 import { registerCodexTools } from "./tools/codex.tools.ts";
@@ -16,7 +15,6 @@ export type RegisterTools = (server: McpServer) => void;
 
 const REGISTRARS: readonly RegisterTools[] = [
   registerAnalysisTools,
-  registerBoardTools,
   registerCampaignTools,
   registerClosureTools,
   registerCodexTools,

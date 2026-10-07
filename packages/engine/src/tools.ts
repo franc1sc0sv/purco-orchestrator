@@ -5,7 +5,14 @@ import type { AgentScratch } from "./agent-scratch.ts";
 import type { EscalationRegistry } from "./escalation.ts";
 import type { MessageBus } from "./bus.ts";
 import type { Scratchpad } from "./scratchpad.ts";
-import { ROLES, type Phase, type RoleName } from "./types.ts";
+import { parseHandoff } from "./handoff.ts";
+import {
+  OUTCOME_KINDS,
+  ROLES,
+  type Phase,
+  type RoleName,
+  type StepResult,
+} from "./types.ts";
 
 export const SERVER_NAME = "orch";
 
@@ -28,23 +35,7 @@ const json = (payload: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(payload) }],
 });
 
-export const OUTCOME_KINDS = [
-  "delivered",
-  "blocked",
-  "disputed",
-  "failed",
-] as const;
-
-export type OutcomeKind = (typeof OUTCOME_KINDS)[number];
-
-export type HandoffInput = {
-  summary: string;
-  outputPath?: string;
-  produced: string[];
-  openQuestions: number;
-  status: OutcomeKind;
-  evidence?: string;
-};
+export type HandoffInput = StepResult;
 
 export type ToolContext = {
   scratchpad: Scratchpad;
@@ -242,7 +233,7 @@ export const buildOrchestratorServer = (ctx: ToolContext) =>
 
       tool(
         "handoff",
-        "Declare the outcome of your step. Call it once, at the end. The orchestrator checks that every file you name exists and refuses the handoff when one does not.",
+        "Declare the outcome of your step. Call it once, at the end. The orchestrator checks the shape of the handoff and that every file you name exists, and refuses the handoff when either is wrong.",
         {
           status: z
             .enum(OUTCOME_KINDS)
@@ -265,22 +256,35 @@ export const buildOrchestratorServer = (ctx: ToolContext) =>
             .string()
             .optional()
             .describe("required unless status is delivered: the file, line or tool result behind it"),
+          counts: z
+            .object({})
+            .catchall(z.unknown())
+            .optional()
+            .describe("optional object of numbers that measure your result, for example {\"files_changed\": 4}"),
+          findings: z
+            .array(z.unknown())
+            .optional()
+            .describe("optional list of {title, severity, location} for each defect or risk you found"),
         },
         async (args) => {
           const agent = ctx.activeAgent();
-          if (args.status !== "delivered" && !args.evidence) {
+          const parsed = parseHandoff(args);
+          if (!parsed.ok) {
+            ctx.scratchpad.record(
+              agent,
+              ctx.currentPhase(),
+              "tool_error",
+              `handoff refused: ${parsed.fix.slice(0, 300)}`,
+            );
             return {
-              ...json({
-                accepted: false,
-                fix: "A handoff that is not delivered needs evidence. Name the file, line or tool result, then call handoff again.",
-              }),
+              ...json({ accepted: false, fix: parsed.fix }),
               isError: true,
             };
           }
-          const produced = args.produced ?? [];
+          const handoff = parsed.result;
           const named = [
-            ...(args.output_path ? [args.output_path] : []),
-            ...produced,
+            ...(handoff.outputPath ? [handoff.outputPath] : []),
+            ...handoff.produced,
           ];
           const missing = named.filter(
             (file) => !fs.existsSync(ctx.resolvePath(file)),
@@ -302,20 +306,12 @@ export const buildOrchestratorServer = (ctx: ToolContext) =>
               isError: true,
             };
           }
-          const handoff: HandoffInput = {
-            summary: args.summary,
-            outputPath: args.output_path,
-            produced,
-            openQuestions: args.open_questions ?? 0,
-            status: args.status,
-            evidence: args.evidence,
-          };
           ctx.recordHandoff(agent, handoff);
           ctx.scratchpad.record(
             agent,
             ctx.currentPhase(),
             "handoff",
-            `${args.status}: ${args.summary}`,
+            `${handoff.status}: ${handoff.summary}`,
             { ...handoff },
           );
           return json({ accepted: true, files: named.length });

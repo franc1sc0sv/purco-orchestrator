@@ -42,10 +42,6 @@ export type OpenEscalation = {
   claim: string;
 };
 
-export type PostOverride = {
-  overriddenBy: string;
-  reason: string;
-};
 
 const KNOWN_RESOLUTIONS: ReadonlySet<string> = new Set<string>(
   ESCALATION_RESOLUTIONS

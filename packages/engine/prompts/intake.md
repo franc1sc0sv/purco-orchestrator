@@ -35,4 +35,18 @@ If the ticket is unreadable, missing, or its project cannot be found,
 `escalate` at level `orchestrator` rather than inventing the ask.
 
 Finish with `handoff`, naming the file, and a summary that states the blocking
-decisions in one sentence each.
+decisions in one sentence each. The handoff must carry `counts` with exactly these
+facts, because code uses them to size the ticket:
+
+- `files_named`: how many distinct code files the ticket, its comments and its
+  sibling tickets name.
+- `backend`: 1 when the change touches backend code (`src/server`, `prisma`,
+  `db`), otherwise 0.
+- `frontend`: 1 when the change touches frontend code (`src/client`,
+  `src/pages`), otherwise 0.
+- `migration`: 1 when the change needs a database migration, otherwise 0.
+- `flag`: 1 when the change adds, changes or removes a feature flag, otherwise 0.
+- `acceptance_criteria`: how many separate acceptance criteria the ticket states.
+  Count each checkable statement once.
+
+Count what the ticket says, not what you guess the plan will need.

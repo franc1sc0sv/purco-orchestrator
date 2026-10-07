@@ -1,4 +1,4 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MODELS } from "./types.ts";
 
 export const LEAD_DECISIONS = [
@@ -79,25 +79,27 @@ export type LeadDeps = {
   additionalDirectories: string[];
   env: Record<string, string | undefined>;
   model?: string;
-  loadSession: () => string | undefined;
-  saveSession: (sessionId: string) => void;
-  onCost: (cumulativeUsd: number) => void;
+  onCost: (usd: number) => void;
 };
 
 export class Lead {
   private readonly deps: LeadDeps;
-  private sessionId: string | undefined;
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(deps: LeadDeps) {
     this.deps = deps;
-    this.sessionId = deps.loadSession();
   }
 
-  session(): string | undefined {
-    return this.sessionId;
+  decide(event: LeadEvent, onMessage?: (message: SDKMessage) => void): Promise<LeadDecision> {
+    const next = this.queue.then(() => this.decideNow(event, onMessage));
+    this.queue = next.catch(() => undefined);
+    return next;
   }
 
-  async decide(event: LeadEvent): Promise<LeadDecision> {
+  private async decideNow(
+    event: LeadEvent,
+    onMessage?: (message: SDKMessage) => void,
+  ): Promise<LeadDecision> {
     let structured: unknown;
     let failure = "";
     try {
@@ -116,14 +118,9 @@ export class Lead {
           permissionMode: "dontAsk",
           maxTurns: 16,
           outputFormat: { type: "json_schema", schema: LEAD_SCHEMA },
-          ...(this.sessionId ? { resume: this.sessionId } : {}),
         },
       })) {
-        const id = (message as { session_id?: string }).session_id;
-        if (id && id !== this.sessionId) {
-          this.sessionId = id;
-          this.deps.saveSession(id);
-        }
+        onMessage?.(message);
         if (message.type !== "result") continue;
         this.deps.onCost(message.total_cost_usd ?? 0);
         if (message.subtype === "success") {

@@ -9,7 +9,7 @@ continues when the user answers, so there are no segments to relaunch and no con
 
 ## Keep this session small
 
-The engine keeps the memory: the lead's session, the store, the pack and the run directory. This
+The engine keeps the memory: the store (steps, results, the lead's decision log), the pack and the run directory. The lead keeps none; it gets a fresh brief for each decision. This
 session keeps only the paths, the run id and the items the watch reports.
 
 - Do not read `report.md`, `live.md`, `events.jsonl` or the pack files unless the user asks, or a
@@ -29,8 +29,9 @@ session keeps only the paths, the run id and the items the watch reports.
 
 ## Move 1: the run id
 
-Reuse the last run id for this ticket, so a resumed ticket keeps its steps, questions and lead
-session under one key:
+Reuse the last run id for this ticket, so a resumed ticket keeps its steps and questions under one key.
+The engine holds a lease on the ticket, so a second launch is refused while the first is alive; a run whose
+process died is taken over after 60 s of silence:
 
 ```bash
 node --experimental-strip-types --no-warnings -e "
@@ -64,7 +65,6 @@ Bash with `run_in_background: true`:
 node $ENGINE/bin/purco-orchestrate.js $TICKET \
   --run-id $RUN \
   --mailbox-db $DB \
-  --budget <usd> \
   --worktree $WT
 ```
 
@@ -73,13 +73,26 @@ node $ENGINE/bin/purco-orchestrate.js $TICKET \
   and `--scope backend|frontend` when the targets do not make it obvious.
 - `--mailbox-db` is required: without it the run asks on its own stdin, which no background
   process can answer.
-- `--budget` is the ceiling for the whole run, lead included. Take it from the last
-  `report.md` of a similar ticket; the cost table there names each step.
 - `--dry-run` prints the steps and the gates and costs nothing.
 - `--test-depth quick|full` sets how deep the Test Forge step goes. `quick` (the ticket default)
-  skips mutation and pruning, which are the longest phases; `full` (the default for
-  `--workflow test`) runs all eight phases. Say which one ran when you report the result.
-- Do not pass `--model`. Every role names its own model, all Opus 5.5 or Sonnet 5.5.
+  skips mutation and pruning, which are the longest stages; `full` (the default for
+  `--workflow test`) runs them on the changed lines only. Say which one ran when you report the result.
+- `--test-mode harden` (or a `test-mode.txt` file with `harden` in the context pack) mutates the changed
+  lines against the existing usecase-level tests first, then adds tests only for survivors. It never
+  prunes and never deletes an existing test. It ends `escalated` because D7, D8 and D9 cannot hold
+  without a matrix; read the summary for the predicates that really fail. The default is `write`.
+- The dashboard can answer open gates, questions and signatures (`POST /api/tickets/<ticket>/items/<id>/answer`).
+- The ticket runs in four stages (plan, implementation, testing, verification) in this order: intake,
+  grill, plan, build, static, test, verify, record, review. Intake sizes the ticket S, M or L, and the
+  intake gate card says why ("Size: X, because: ..."). Answer the gate with `approve`, or add one word
+  (`S`, `M`, `L`, `approve size L`) to change the size. The size only goes up during the run. S skips
+  the grill; the test depth follows the size (S and M quick, L full) unless `--test-depth` is given.
+- `verify` also writes recording scripts and `verify/flows/flows.json`; `record` then runs them with no
+  model and writes the videos to `verify/videos/`. `record` is `skipped` when the ticket worktree has no
+  `tests/e2e/flows/recording.config.ts` or when verify wrote no scripts. A failing script fails the
+  step. Tell the user which videos exist, and embed them in the PR at ship.
+- Do not pass `--model`. Every role names its own model: Sonnet 5.5 by default, Opus 5.5 for the
+  planner, the reviewer, the lead, the defect skeptic and the equivalence hunter.
 
 ## Move 4: route every item
 
@@ -125,9 +138,9 @@ moving.
 node $ENGINE/bin/purco-spike.js status --db $DB --run $RUN
 ```
 
-Report the step table, the cost and why the run ended. When a Test Forge step ran, the end of
-`$GAF/orchestrator-runs/$RUN/forge.log` holds its cost per post (`COST BY POST`); report the top
-three posts. A step that ended `escalated` or a run that
+Report the step table, the cost and why the run ended. When a Test Forge step ran, each of its
+workers has its own `test:<stage>:<file>` row in the status output; report the three most
+expensive rows. `$GAF/orchestrator-runs/$RUN/forge.log` holds the vector after each pass. A step that ended `escalated` or a run that
 `stopped` did not finish: say what stopped it, from the status output, and what the user can
 change before a relaunch with `--resume`.
 

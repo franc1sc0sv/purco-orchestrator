@@ -1,6 +1,6 @@
 # Mechanization guide
 
-CPO Mendez follows this guide when drafting a rule. Nothing here is advice. A rule that fails any
+The rule writer follows this guide when drafting a rule. Nothing here is advice. A rule that fails any
 gate in this document does not enter the codex.
 
 A rule is a **detection procedure**, not a sentence. "Tests should be isolated" is a slogan. A rule
@@ -18,7 +18,7 @@ Before anything else, ask:
 > different verdicts?
 
 If the answer is yes, the rule is not ready. Send it back down the ladder in section 2, or grill
-Captain Lasky until the ambiguity is named and closed.
+the user until the ambiguity is named and closed.
 
 Three things make a rule undecidable. Each has a fix.
 
@@ -47,7 +47,7 @@ Every rule sits at one of three tiers. Tier 3 is where drafting starts. Tier 3 i
 | ---- | ------------------- | ------------------------------------------------ | ----------------------------------- |
 | 3    | Free judgment       | A sentence and its own taste                     | Never                               |
 | 2    | Structured judgment | A fixed rubric of 3-5 closed questions           | Yes, marked `judgment` or `partial` |
-| 1    | Mechanical          | An AST or structural query run by Roland in code | Yes, marked `full`                  |
+| 1    | Mechanical          | An AST or structural query run by the test-forge tools in code | Yes, marked `full`                  |
 
 The worked example below is the same rule at all three tiers. The rule comes from the `isolation`
 aspect: a test must carve out its own data by a dedicated owning entity, not by a time window.
@@ -61,7 +61,7 @@ statement: Tests should isolate their data properly and not rely on date windows
 Why this fails: "properly" is undefined; two reviewers reading the same file will split on whether a
 `createdAt` bound counts as isolation or as an ordinary filter; the rule cannot say what to do with
 a test of a date filter. Verdicts from a tier-3 rule are unreproducible, so they cannot be diffed
-across runs, cannot be regression-tested, and cannot be audited by ONI Section Zero.
+across runs, cannot be regression-tested, and cannot be audited.
 
 Tier 3 exists for exactly one purpose: it is what the human says out loud in the first minute of the
 doctrine session. It is raw material.
@@ -116,11 +116,11 @@ chosen by the inspector.
 
 This is shippable. Two reviewers can still disagree on a single rubric answer, but the disagreement
 is now **localised and nameable**: they disagree on question 3, on this file, and that is a
-one-sentence question for Captain Lasky rather than an argument about philosophy.
+one-sentence question for the user rather than an argument about philosophy.
 
 ### Tier 1 — mechanical
 
-The rubric collapses into a structural query that Roland runs in code. No model is consulted.
+The rubric collapses into a structural query that the test-forge tools run in code. No model is consulted.
 
 ```json
 {
@@ -155,7 +155,7 @@ The rubric collapses into a structural query that Roland runs in code. No model 
 ```
 
 Tier 1 is worth the effort because a mechanical check is free to run, identical on every run, and
-diffable. Roland can run it across ten thousand files in a second, which is what makes the
+diffable. The test-forge tools can run it across ten thousand files in a second, which is what makes the
 disagreement set in section 6 possible at all.
 
 Not every rule reaches tier 1, and forcing one that cannot is worse than leaving it at tier 2. A
@@ -212,7 +212,7 @@ If the human's answer is a search that returns half the corpus, the rule is too 
 | `decidedBy`     | `human` or `corpus`                                                   | A rule the human overruled records `human` |
 
 `detect` never returns a verdict, and `violates` never reads the file. Keeping the two apart is what
-lets Roland cache detection results and re-score a redrafted rule without re-reading anything.
+lets the test-forge tools cache detection results and re-score a redrafted rule without re-reading anything.
 
 ---
 
@@ -312,7 +312,7 @@ Then:
 
 1. Every file in a disagreement cell becomes a **fixture**, with the sweep's label as expected.
 2. Every distinct _reason_ behind a disagreement becomes an item on the **grilling agenda** for
-   Captain Lasky. Not every file — the reason. Fourteen files that all filter by date because they
+   the user. Not every file — the reason. Fourteen files that all filter by date because they
    test date filters are one agenda item.
 3. The agenda item is a closed question with the options spelled out, never "what do you think about
    this?" For example: _"Fourteen tests filter by date and pass a dedicated client as well. Is the
@@ -326,7 +326,7 @@ cannot get under that ceiling is either two rules wearing one name — split it 
 
 ## 7. Acceptance: fix the rule, never the labels
 
-Deja Examiner runs the acceptance gate. The rule passes only when:
+The rule examiner runs the acceptance gate. The rule passes only when:
 
 - every fixture returns its expected verdict,
 - **every near-miss returns its expected verdict**, counted separately from ordinary fixtures,

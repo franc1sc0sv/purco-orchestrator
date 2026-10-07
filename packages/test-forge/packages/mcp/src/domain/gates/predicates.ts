@@ -5,15 +5,15 @@ import type {
   PredicateResult,
 } from "test-forge-contracts/gates";
 
-export const NOBLE_VERDICTS = [
+export const DEFECT_VERDICTS = [
   "confirmed-defect",
   "confirmed-but-known",
 ] as const;
 
-export type NobleVerdict = (typeof NOBLE_VERDICTS)[number];
+export type DefectVerdict = (typeof DEFECT_VERDICTS)[number];
 
-export const isNobleVerdict = (value: string): value is NobleVerdict =>
-  NOBLE_VERDICTS.includes(value as NobleVerdict);
+export const isDefectVerdict = (value: string): value is DefectVerdict =>
+  DEFECT_VERDICTS.includes(value as DefectVerdict);
 
 export const CONFORMANCE_VERDICTS = ["pass", "not-applicable"] as const;
 
@@ -376,12 +376,12 @@ export const verifiedPredicate = ({
     const verdict = verdicts.some(
       (entry) =>
         entry.subjectKind === "test" &&
-        isNobleVerdict(entry.verdict) &&
+        isDefectVerdict(entry.verdict) &&
         refNamesTest(entry.subjectRef, failure)
     );
     const confirmed = findings.some(
       (entry) =>
-        isNobleVerdict(entry.status) &&
+        isDefectVerdict(entry.status) &&
         (refNamesTest(entry.findingKey, failure) ||
           refNamesTest(entry.location, failure))
     );
@@ -396,7 +396,7 @@ export const verifiedPredicate = ({
     failed.push({
       ref,
       reason:
-        "this test is red and carries no Noble Team verdict of confirmed-defect or confirmed-but-known",
+        "this test is red and carries no defect verifier verdict of confirmed-defect or confirmed-but-known",
       location: failure.file,
     });
   }

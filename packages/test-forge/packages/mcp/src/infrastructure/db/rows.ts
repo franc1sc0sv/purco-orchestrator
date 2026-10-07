@@ -1,12 +1,3 @@
-import type {
-  Outcome,
-  Rank,
-  Replay,
-  ReplayResult,
-  Trend,
-  WarGameScenario,
-  WarGameStatus,
-} from "test-forge-contracts/board";
 import type { ResolutionState } from "test-forge-contracts/closure";
 import type {
   Acceptance,
@@ -26,7 +17,6 @@ import type {
   MutantOutcome,
   MutationOperator,
 } from "test-forge-contracts/mutation";
-import type { OutcomeKind } from "test-forge-contracts/outcome";
 import type { Project, Scope } from "test-forge-contracts/project";
 
 export type SchemaMetaRow = {
@@ -152,25 +142,6 @@ export type EscalationRow = {
   created_at: string;
 };
 
-export type AssignmentRow = {
-  id: number;
-  project_key: string;
-  run_id: number;
-  assignment_key: string;
-  suggested_post: string;
-  assigned_post: string;
-  assigned_to: string;
-  subject_kind: EscalationSubjectKind;
-  subject_ref: string;
-  instruction: string;
-  override_by: string | null;
-  override_reason: string | null;
-  outcome_kind: OutcomeKind | null;
-  outcome_json: string | null;
-  escalation_id: number | null;
-  created_at: string;
-  completed_at: string | null;
-};
 
 export type UnitState =
   | "assigned"
@@ -346,56 +317,6 @@ export type FocusItemRow = {
   test_ref: string | null;
 };
 
-export type WarGameRow = {
-  id: number;
-  project_key: string;
-  scenario_key: string;
-  squad: string;
-  post: string;
-  aspect: string;
-  engagement_json: string;
-  what_happened: string;
-  what_was_correct: string;
-  root_cause: string;
-  status: WarGameStatus;
-  created_at: string;
-};
-
-export type ReplayRow = {
-  id: number;
-  scenario_id: number;
-  result: ReplayResult;
-  note: string;
-  created_at: string;
-};
-
-export type OutcomeRow = {
-  id: number;
-  project_key: string;
-  run_id: number | null;
-  callsign: string;
-  post: string;
-  aspect: string;
-  event_kind: string;
-  weight: number;
-  created_at: string;
-};
-
-export type RankRecordRow = {
-  id: number;
-  project_key: string;
-  callsign: string;
-  post: string;
-  aspect: string;
-  rank: Rank;
-  score: number;
-  trend: Trend;
-  updated_at: string;
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const toBoolean = (value: number): boolean => value === 1;
 
 const toNullableBoolean = (value: number | null): boolean | null =>
@@ -446,41 +367,3 @@ export const toEquivalenceClaim = (
   signedBy: row.signed_by,
   createdAt: row.created_at,
 });
-
-export const toOutcome = (row: OutcomeRow): Outcome => ({
-  outcomeId: row.id,
-  runId: row.run_id,
-  callsign: row.callsign,
-  post: row.post,
-  aspect: row.aspect,
-  eventKind: row.event_kind,
-  weight: row.weight,
-  createdAt: row.created_at,
-});
-
-export const toReplay = (row: ReplayRow): Replay => ({
-  result: row.result,
-  note: row.note,
-  createdAt: row.created_at,
-});
-
-export const toWarGameScenario = (
-  row: WarGameRow,
-  lastReplay: Replay | null
-): WarGameScenario => {
-  const parsed: unknown = JSON.parse(row.engagement_json);
-  return {
-    scenarioId: row.id,
-    scenarioKey: row.scenario_key,
-    squad: row.squad,
-    post: row.post,
-    aspect: row.aspect,
-    engagement: isRecord(parsed) ? parsed : {},
-    whatHappened: row.what_happened,
-    whatWasCorrect: row.what_was_correct,
-    rootCause: row.root_cause,
-    status: row.status,
-    createdAt: row.created_at,
-    lastReplay,
-  };
-};

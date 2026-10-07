@@ -228,7 +228,7 @@ export const state = async ({ cwd, runId }: StateInput) => {
   if (unverifiedFindings.length > 0) {
     openBlocks.push({
       predicate: "D4",
-      reason: "Blocking findings carry no Noble Team verdict.",
+      reason: "Blocking findings carry no defect verifier verdict.",
       refs: unverifiedFindings.map((finding) => finding.findingKey),
     });
   }

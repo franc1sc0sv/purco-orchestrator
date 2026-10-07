@@ -4,7 +4,7 @@ import type {
   UnresolvedNode,
 } from "test-forge-contracts/closure";
 
-export const DEFAULT_CITATION_VERIFIER = "roland:citation-check";
+export const DEFAULT_CITATION_VERIFIER = "test-forge:citation-check";
 
 export type ResolutionRejection = {
   resolved: false;

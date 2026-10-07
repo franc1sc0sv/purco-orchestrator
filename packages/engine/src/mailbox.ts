@@ -14,6 +14,7 @@ export type MailboxAsk = {
   phase: string;
   pollMs?: number;
   timeoutMs?: number;
+  payload?: unknown;
   onPost?: (id: string) => void;
 };
 
@@ -28,7 +29,7 @@ export const askViaMailbox = async (
 ): Promise<{ id: string; answer?: string }> => {
   const store = new Store(ask.dbPath, ask.runId);
   const id = `${PREFIX[ask.kind]}-${randomUUID().slice(0, 8)}`;
-  store.askQuestion(id, ask.fromAgent, ask.phase, ask.kind, ask.question);
+  store.askQuestion(id, ask.fromAgent, ask.phase, ask.kind, ask.question, ask.payload);
   ask.onPost?.(id);
 
   const pollMs = ask.pollMs ?? 2000;

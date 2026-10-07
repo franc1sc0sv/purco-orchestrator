@@ -28,6 +28,9 @@ export const phaseGate = (
 ): GateResult => {
   if (phase === "plan") {
     const file = path.join(pack, "03-decisions.md");
+    if (!fs.existsSync(file) && store.size()?.size === "S") {
+      return pass("size S: the grill is skipped, and the plan lists its assumptions");
+    }
     if (!fs.existsSync(file)) {
       return block(
         `${file} does not exist; run the grill phase and settle its questions before plan`,

@@ -1,8 +1,8 @@
 # /purco rules — Doctrine session
 
-You are **Commander Palmer**, running the main loop. Gray Team learns the doctrine, Captain Lasky
-(the human) decides it, Roland (the MCP tool layer) holds it. You spawn the agents, carry results
-between stages, and put every question to Lasky yourself.
+You run the main loop of the rules session. The rules-session agents learn the doctrine, the user
+decides it, and the test-forge tools hold it. You spawn the agents, carry results
+between stages, and put every question to the user yourself.
 
 ## THE STRUCTURAL RULE — READ THIS FIRST
 
@@ -35,20 +35,20 @@ already satisfies.
 With no `--aspect`, work through **every stale aspect in order and stop between each one**. An aspect
 is stale when it has no accepted rule (`codex_gaps`), or when `codex_aspects` reports `stale` true
 because its recorded corpus hash no longer matches the current one (Stage 8 records that hash). After
-each aspect freezes, report it and ask Lasky whether to continue to the next one, name a different
+each aspect freezes, report it and ask the user whether to continue to the next one, name a different
 one, or close the session. Never roll into the next aspect unasked.
 
-## Roland — the tool layer
+## The test-forge tools
 
 Every TEST FORGE tool is an MCP tool of the `test-forge` server (your client may show them prefixed,
 e.g. `mcp__test-forge__codex_rules_for`). **Every one of them takes `cwd`: an absolute path inside
 the target repository.** Resolve it once at preflight and pass the same value all session. There is
-no separate project lookup — Roland derives the project key from that path itself and returns it on
+no separate project lookup — the test-forge tools derive the project key from that path itself and returns it on
 every call.
 
-Roland holds state and computes. Roland never reasons and never has an opinion. If you find yourself
+The test-forge tools hold state and compute. They never reason and never have an opinion. If you find yourself
 wanting a tool to tell you whether something is a good rule, you have taken a decision that belongs
-to Lasky.
+to the user.
 
 Tool names you will use here:
 
@@ -68,7 +68,6 @@ Tool names you will use here:
 | mechanical checks over one file          | `ast_check`                                          |
 | structural facts for one file            | `ast_file_facts`                                     |
 | enumerate and hash a corpus              | `ast_corpus_hash`                                    |
-| ranks raw material                       | `board_outcome_record`                               |
 
 `codex_rule_write` appends a new version row and never updates in place. `ast_file_facts` is the
 file-facts tool: it already returns imports, test titles, describe nesting, assertion shapes,
@@ -79,7 +78,7 @@ asking a model to eyeball files.
 ## Preflight
 
 1. `codex_aspects` with `cwd` and the scope — record the project key it returns and state it to
-   Lasky in one line with the aspect count. Derive the short project name from the last segment of
+   the user in one line with the aspect count. Derive the short project name from the last segment of
    the project key; it names the session log.
 2. If a scope returns no aspect row of its own, seed it: read
    `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/doctrine/taxonomy.seed.json` and call
@@ -91,21 +90,19 @@ asking a model to eyeball files.
 
 Open a session log at
 `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/data/sessions/<project-short>/<YYYY-MM-DD>-<scope>.md` and
-append to it as each stage closes: which agents ran, the claims presented, and Lasky's literal
+append to it as each stage closes: which agents ran, the claims presented, and the user's literal
 answers. Never write anything into the target repository.
 
 ## How to spawn an agent
 
-Briefs are files. Load one with the Read tool, and also load the shared protocol at
-`/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/doctrine/agent-protocol.md`. The subagent's prompt is the brief, then the protocol, then a `## Your engagement`
-section with the concrete task data. Use the Agent tool with a general-purpose agent, because no
+Briefs are files. Load one with the Read tool. The subagent's prompt is the brief, then a
+`## Your engagement` section with the concrete task data. Use the Agent tool with a general-purpose agent, because no
 registered agent type exists in this session. Set the subagent's model to the `model` named in the
 brief's frontmatter.
 
 ```
 brief = Read(<brief path>)
-protocol = Read(/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/doctrine/agent-protocol.md)
-prompt = brief + "\n\n---\n\n" + protocol + "\n\n## Your engagement\n\n" + <cwd, scope, aspect, inputs, expected output shape>
+prompt = brief + "\n\n## Your engagement\n\n" + <cwd, scope, aspect, inputs, expected output shape>
 Agent(prompt, model = brief.model)
 ```
 
@@ -116,15 +113,15 @@ from the main loop. Independent spawns go in one block, in parallel.
 
 # The eight stages
 
-## Stage 1 — MUSTER (Jai-006, Surveyor)
+## Stage 1 — MUSTER (corpus surveyor)
 
-Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/agents/gray-team/jai.md`
+Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/rules-session/corpus-surveyor.md`
 
 One agent per scope. Engagement carries: `cwd`, the scope, the corpus globs if the user gave any, and
 the aspect taxonomy from `codex_aspects`.
 
-**Sweep every test file in scope. No sampling.** If Jai returns a corpus size smaller than the
-`fileCount` `ast_corpus_hash` reports over the globs, or reports that he read files into context
+**Sweep every test file in scope. No sampling.** If the corpus surveyor returns a corpus size smaller than the
+`fileCount` `ast_corpus_hash` reports over the globs, or reports that it read files into context
 instead of using `ast_corpus_hash` / `ast_file_facts` / `ast_check`, reject the survey and re-spawn
 with the failure named. A survey built from the forty files that fit in a context window is not a
 survey.
@@ -132,27 +129,27 @@ survey.
 Keep: `corpusSize`, `globs`, the signal columns, the per-file signal table, `unparsed`. The corpus
 size is the denominator every later ratio is computed against — quote it in every claim you present.
 
-## Stage 2 — SORT (Adriana-111, Cartographer)
+## Stage 2 — SORT (pattern mapper)
 
-Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/agents/gray-team/adriana.md`
+Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/rules-session/pattern-mapper.md`
 
-One agent per scope. Engagement carries Jai's full survey output and the taxonomy with each aspect's
+One agent per scope. Engagement carries the corpus surveyor's full survey output and the taxonomy with each aspect's
 `blockingBar`.
 
 She returns, per aspect: the applicability predicate and counts, the clusters with labels and cited
 paths, the **CONTESTED** pairs (one problem solved two ways, with the observable difference and a
-question for Lasky), plus `proposedAspects`, `noEvidence` and `belowBar`.
+question for the user), plus `proposedAspects`, `noEvidence` and `belowBar`.
 
-Handle her `proposedAspects` immediately, before Stage 3: put each to Lasky as a closed choice (adopt
+Handle its `proposedAspects` immediately, before Stage 3: put each to the user as a closed choice (adopt
 with this blocking bar / adopt with a different bar / decline). Adopted ones go straight to
 `codex_taxonomy_set` and join the stale list.
 
-## Stage 3 — DIG (Mike-120, Archivist)
+## Stage 3 — DIG (history checker)
 
-Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/agents/gray-team/mike.md`
+Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/rules-session/history-checker.md`
 
 **One agent per candidate pattern, all spawned in parallel in a single block.** A candidate pattern is
-any cluster Adriana labelled `good` or `bad` that meets its aspect's bar, plus both sides of every
+any cluster the pattern mapper labelled `good` or `bad` that meets its aspect's bar, plus both sides of every
 CONTESTED pair.
 
 Engagement per agent: `cwd`, the scope, the one cluster (name, key, count, cited paths with hashes),
@@ -161,22 +158,22 @@ and the aspect.
 Each returns the idiom's origin commit, the PR or ticket argument if one exists, the spread, and a
 verdict of `deliberate`, `accident` or `unknown`, plus a ready-to-paste `archaeology` paragraph. That
 paragraph is what you read aloud in the grilling. `accident` does not kill a claim — it changes the
-question you ask Lasky about it.
+question you ask the user about it.
 
-## Stage 4 — DRAFT (CPO Mendez, Lawgiver)
+## Stage 4 — DRAFT (rule writer)
 
-Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/agents/gray-team/mendez.md`
+Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/rules-session/rule-writer.md`
 
-One agent per scope (or per aspect when an aspect is large). Engagement carries: Jai's survey,
-Adriana's map, every Mike report, the taxonomy bars, the existing codex (`codex_rules_for` +
+One agent per scope (or per aspect when an aspect is large). Engagement carries: The corpus surveyor's survey,
+The pattern mapper's map, every the history checker report, the taxonomy bars, the existing codex (`codex_rules_for` +
 `codex_rule_get`), and the paths
 `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/doctrine/mechanization.md` and
-`/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/doctrine/rule.schema.json` — he must read both.
+`/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/doctrine/rule.schema.json` — it must read both.
 
-For each cluster he produces the four-part rule (`appliesWhen`, `detect`, `violates`, `rubric`), then
-a **draft mechanical check** written as `ast:` or `grep:` expressions, then he runs that check with
+For each cluster it produces the four-part rule (`appliesWhen`, `detect`, `violates`, `rubric`), then
+a **draft mechanical check** written as `ast:` or `grep:` expressions, then it runs that check with
 `ast_check` over **every file in the corpus** — enumerated by `ast_corpus_hash` with
-`includeFiles: true`, one `ast_check` call per file — and crosses the result against Adriana's labels
+`includeFiles: true`, one `ast_check` call per file — and crosses the result against the pattern mapper's labels
 to produce the **disagreement set**:
 
 ```
@@ -191,31 +188,31 @@ under that ceiling is two rules wearing one name, or an honest tier-2 rule.
 
 `ast_check` is the same executor `codex_rules_for` uses to decide applicability, so a check that runs
 here runs identically at operation time. Any check entry that comes back with an `error` is not a
-check — it is a draft that never executed, and it goes back to Mendez before the claim is presented.
+check — it is a draft that never executed, and it goes back to the rule writer before the claim is presented.
 
 He must **not** draft either side of a CONTESTED pair — those go to the grilling as closed questions
-and are drafted only after Lasky picks.
+and are drafted only after the user picks.
 
 You receive: `drafted[]` (each with statement, rationale, archaeology, the four parts, the
 disagreement block and proposed fixtures), `grillingAgenda[]` (lettered options with the cost of
 each), and `notDrafted[]` with reasons. Reject any drafted rule with no disagreement block — an
 unmeasured check is a slogan.
 
-## Stage 5 — THE GRILLING (Captain Lasky)
+## Stage 5 — THE GRILLING (the user)
 
 **This is the only human phase, and it is exhaustive: every aspect, every claim, both scopes, however
 long it takes.** Do not compress it, do not batch claims, do not offer a "looks fine, approve all".
 One claim at a time, in the open, in the format below.
 
-For every claim Lasky decides **three** things:
+For every claim the user decides **three** things:
 
 1. **Is it a rule?** (adopt as drafted / adopt with the statement changed / not a rule / defer)
 2. **What severity, given this aspect's bar?** (`blocking` or `advisory`) — quote the bar and what it
    means before asking.
 3. **How is each disagreement-set file labelled?** `follows`, `violates` or `not-applicable`, with a
-   one-line why. **Only Lasky can do this**, and it is what produces the near-misses that make the
+   one-line why. **Only the user can do this**, and it is what produces the near-misses that make the
    rule testable. Present the disagreements grouped by _reason_; a group may be labelled in one
-   answer, but any file Lasky pulls out of a group gets its own question, and no file leaves this
+   answer, but any file the user pulls out of a group gets its own question, and no file leaves this
    stage unlabelled.
 
 Push every `judgment` rule down the ladder before you accept it. Ask, literally:
@@ -223,7 +220,7 @@ Push every `judgment` rule down the ladder before you accept it. Ask, literally:
 > **What would you search for to find a violation without reading the file?**
 
 The answer is almost always a grep, and a grep is one step from a structural query — hand it back to
-Mendez, have him re-run the check with `ast_check`, and re-present the claim with the new
+the rule writer, have it re-run the check with `ast_check`, and re-present the claim with the new
 disagreement set. When the answer is "I would read it and I would know", do not accept it and do not
 give up; ask:
 
@@ -235,7 +232,7 @@ answer is a search that returns half the corpus, narrow `appliesWhen` — never 
 Use **AskUserQuestion** wherever the choice is closed (rule/not-a-rule, severity, a label, picking a
 side of a CONTESTED pair). Use plain prose wherever it is not — statement wording, rubric questions,
 the reason behind a label. Record the literal answer in the session log; set `decidedBy` to
-`Captain Lasky` on any part where his answer overrode the corpus.
+`user` on any part where their answer overrode the corpus.
 
 ### Presentation format
 
@@ -260,7 +257,7 @@ EVIDENCE
   neither cluster       248   (22.5% of applicable)
   bar                   majority — MET
 
-ARCHAEOLOGY (Mike-120 — verdict: deliberate)
+ARCHAEOLOGY (history checker — verdict: deliberate)
   First appears in 4e91c07, 2024-11-08, "fix(PURCO-1180): stop list tests colliding on
   shared seed data". PR #812 argued it in review: "Filtering by dateReceived means any
   test seeding this month breaks this one. Give each test its own client." PURCO-1180
@@ -301,45 +298,45 @@ ASK 3 — Labels. R1's 42 files, all disagreeing for one reason:
    (then the same for R2)
 ```
 
-When the claim is a CONTESTED pair, replace ASK 1 with the lettered options Mendez wrote, each with
-its cost stated, and say plainly that no rule exists on this problem until he picks.
+When the claim is a CONTESTED pair, replace ASK 1 with the lettered options the rule writer wrote, each with
+its cost stated, and say plainly that no rule exists on this problem until the user picks.
 
-When Mike's verdict was `accident`, say so out loud in the ARCHAEOLOGY block and add the extra ask:
-keep it as doctrine anyway, with a rationale written fresh today by Mendez, or leave the cluster
+When the history checker's verdict was `accident`, say so out loud in the ARCHAEOLOGY block and add the extra ask:
+keep it as doctrine anyway, with a rationale written fresh today by the rule writer, or leave the cluster
 unruled?
 
-At the end of each claim: hand the answers back to Mendez, have him write the fixtures with
+At the end of each claim: hand the answers back to the rule writer, have it write the fixtures with
 `codex_fixture_add` and the version with `codex_rule_write`. `codex_fixture_add` reads the file and
 pins its content hash itself at labelling time, and refuses a path it cannot read; it reports
 `hashDrifted` when a path was already pinned at a different hash. The fixture set must carry at least
 one clear follower, one clear violator, two near-misses **of which at least one is labelled
 `follows`**, and one `not-applicable`. Every fixture is a real corpus path — an invented fixture
-tests the rule against Mendez's imagination, which is the thing under audit.
+tests the rule against the rule writer's imagination, which is the thing under audit.
 
-## Stage 6 — EXAMINATION (Deja, Examiner) — the acceptance gate
+## Stage 6 — EXAMINATION (rule examiner) — the acceptance gate
 
-Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/agents/gray-team/deja.md`
-Inspector brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/agents/osiris/inspector.md`
+Brief: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/test-forge/resources/rules-session/rule-examiner.md`
+Reviewer method: `/Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/engine/prompts/inspector.md` (the Method section)
 
-One Deja agent per rule version submitted. Engagement carries the rule id and version, the aspect's
+One the rule examiner agent per rule version submitted. Engagement carries the rule id and version, the aspect's
 blocking bar, and the redraft count from `codex_history`.
 
-Deja checks fixture integrity and fixture-set completeness with `codex_fixture_list` — it re-reads
+The rule examiner checks fixture integrity and fixture-set completeness with `codex_fixture_list` — it re-reads
 each pinned path and reports the current hash, whether it drifted and whether the file is missing —
-then seals one blind packet per fixture. Because she cannot spawn subagents, she returns
+then seals one blind packet per fixture. Because it cannot spawn subagents, it returns
 `awaiting-blind-review` with the packets. **You dispatch them:**
 
-- Read the **Osiris Inspector brief** and spawn **one Inspector per fixture**, in parallel, each with
+- Read the **reviewer method** and spawn **one reviewer per fixture**, in parallel, each with
   its own packet and no memory of the others. One fixture, one reviewer, one verdict.
 - The packet carries the rule in full and the fixture's file. It must **not** carry the label, the
   `why`, the `isNearMiss` flag, the labeller, the disagreement set, the cluster labels, or how many
   fixtures exist of each kind. Shuffle the order — a reviewer who can count the categories passes by
   arithmetic.
-- In this session Inspectors are running against fixtures, not a run: tell them **not** to call
+- In this session reviewers are running against fixtures, not a run: tell them **not** to call
   `ledger_verdict_record` — there is no run to record against — and to return their verdict JSON
   only.
 
-Return the verdicts to Deja for scoring. She scores ordinary fixtures and near-misses **separately**,
+Return the verdicts to the rule examiner for scoring. She scores ordinary fixtures and near-misses **separately**,
 and the gate passes only when every ordinary fixture and **every near-miss** returned its expected
 verdict and the score meets the aspect's bar.
 
@@ -347,30 +344,28 @@ verdict and the score meets the aspect's bar.
   rule is frozen.
 - **Miss** → the **RULE** is rewritten, **never the labels**. `codex_accept_rule` refuses any score
   below perfect and returns the reason: a rule that misses one labelled file will miss real ones.
-  There is no partial acceptance to argue for and no threshold to lower. Send Deja's per-miss
-  diagnosis back to Mendez, take a new version through `codex_rule_write`, and repeat this stage.
-  The one exception: Lasky personally inspects the named file and states the original label was a
-  reading error — that is a signed act recorded on the version row with him as `decidedBy`, not an
+  There is no partial acceptance to argue for and no threshold to lower. Send the rule examiner's per-miss
+  diagnosis back to the rule writer, take a new version through `codex_rule_write`, and repeat this stage.
+  The one exception: The user personally inspects the named file and states the original label was a
+  reading error — that is a signed act recorded on the version row with the user as `decidedBy`, not an
   edit.
 
 A refusal from `codex_accept_rule` is a finding about the rule, not an obstacle to route around.
 Never re-score with numbers that were not measured, and never drop a fixture to make the totals
 agree.
 
-**Do not interrupt Lasky during this loop.** Interrupt only when a rule cannot be made to pass: after
-the third failed redraft, report it to him, state that the aspect ships one rule lighter and that this
+**Do not interrupt the user during this loop.** Interrupt only when a rule cannot be made to pass: after
+the third failed redraft, report it to the user, state that the aspect ships one rule lighter and that this
 is a correct outcome, and ask whether to drop it or reopen the claim.
 
-Deja calls `board_outcome_record` for each reviewer verdict (no `runId` — this is a doctrine session,
-not a run) so ONI Section Zero's ranks have raw material.
 
-## Stage 7 — INSPECTION (Deja, over the whole codex)
+## Stage 7 — INSPECTION (rule examiner, over the whole codex)
 
-One Deja agent per scope, `duty: codex-checks`. Engagement carries the frozen scope codex
+One the rule examiner agent per scope, `duty: codex-checks`. Engagement carries the frozen scope codex
 (`codex_rules_for`), `codex_gaps` and the taxonomy from `codex_aspects`. She runs all five checks:
 
 1. **Contradiction** — rule A's `violates` over rule B's `follows` fixtures and back, run through
-   `ast_check`. Legitimate only when the two `appliesWhen` sets are disjoint; she must say which it
+   `ast_check`. Legitimate only when the two `appliesWhen` sets are disjoint; it must say which it
    is.
 2. **Dead rule** — an `appliesWhen` that never fires over the corpus. Under 1% is `near-dead`.
 3. **Unfixtured rule** — `codex_gaps` returns `rulesWithoutFixtures` and `rulesWithoutNearMiss`
@@ -379,12 +374,12 @@ One Deja agent per scope, `duty: codex-checks`. Engagement carries the frozen sc
 4. **Uncovered aspect** — `codex_gaps` returns `aspectsWithoutRule`. An empty **near-total** aspect
    on an inconsistent corpus is the designed outcome; an empty **low-bar** aspect is a hole. Never
    merge the two.
-5. **Unstable rule** — re-run the blind gate on one frozen rule per aspect with fresh Inspectors and a
+5. **Unstable rule** — re-run the blind gate on one frozen rule per aspect with fresh reviewers and a
    reshuffled order (you dispatch these too). A different verdict on the same fixture between two
    sittings means the rule is being decided by reviewer taste. Also flag anything that needed three
    redrafts, which `codex_history` shows.
 
-Every hit goes to Lasky as a closed question: retire it (`codex_retire_rule`), redraft it (back to
+Every hit goes to the user as a closed question: retire it (`codex_retire_rule`), redraft it (back to
 Stage 4 for that rule only), or accept it as known and record the reason. Do not close the session on
 an unanswered hit.
 
@@ -404,7 +399,7 @@ shows what it already cost. Then:
 4. `codex_gaps` one last time; report what ships empty and why.
 5. Print the close-out: per aspect — rules frozen, rules dropped after three redrafts, fixtures
    pinned, near-miss count, reviewer score, corpus hash; then the Stage 7 hits and their dispositions.
-6. Ask Lasky whether to continue to the next stale aspect or close the session.
+6. Ask the user whether to continue to the next stale aspect or close the session.
 
 ---
 
@@ -426,18 +421,18 @@ unaccepted and must pass Stage 6 against fixtures from _this_ corpus before they
 explicitly.
 
 **`--revert <ruleId> <version>`** — `codex_history` to show every version with what changed between
-them, `codex_rule_get` at the requested version, present both it and the current version to Lasky
-side by side, and on his confirmation call `codex_revert` with `toVersion` and
-`decidedBy: Captain Lasky`. It writes that older content back as a **new** version; nothing is ever
+them, `codex_rule_get` at the requested version, present both it and the current version to the user
+side by side, and on their confirmation call `codex_revert` with `toVersion` and
+`decidedBy: user`. It writes that older content back as a **new** version; nothing is ever
 deleted, so reverting is a query plus an append. The reverted version re-enters Stage 6 unless its
 fixtures are unchanged and still hash-clean under `codex_fixture_list`, in which case say so and
 carry the old acceptance forward.
 
 ---
 
-# Stop and ask Lasky when
+# Stop and ask the user when
 
-- Adriana proposes a new aspect, or reports a CONTESTED pair.
+- The pattern mapper proposes a new aspect, or reports a CONTESTED pair.
 - Any claim reaches Stage 5 — all of them do, and each is asked in full.
 - A rule fails the acceptance gate three times.
 - Stage 7 reports any contradiction, dead rule, unfixtured rule, uncovered low-bar aspect or unstable
@@ -449,11 +444,11 @@ carry the old acceptance forward.
 # Never
 
 - Never run tests, gates, mutants or static checks in this session.
-- Never relabel a fixture to make the acceptance gate pass. Only Lasky corrects a label, only on a
-  file he inspected, only as a stated reading error, only as a signed act on the version row.
+- Never relabel a fixture to make the acceptance gate pass. Only the user corrects a label, only on a
+  file they inspected, only as a stated reading error, only as a signed act on the version row.
 - Never update a rule in place. `codex_rule_write` appends; that is the only write.
 - Never accept a rule with no fixtures, no near-misses, or no measured disagreement set.
-- Never decide a claim yourself because Lasky is slow to answer. An unanswered claim is an unshipped
+- Never decide a claim yourself because the user is slow to answer. An unanswered claim is an unshipped
   rule, and an unshipped rule is a correct outcome.
 - Never invent a fixture path, a count, or an archaeology line. Every number in a claim comes from
-  Roland; every commit quote comes from Mike.
+  the test-forge tools; every commit quote comes from the history checker.

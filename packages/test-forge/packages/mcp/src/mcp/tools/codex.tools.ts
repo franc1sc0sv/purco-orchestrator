@@ -696,7 +696,7 @@ export const registerCodexTools = (server: McpServer): void => {
         "Returns: { projectKey: string, ruleId: string, revertedFrom: number, version: number, rowId: number }.",
         "",
         "Examples:",
-        "- Use it when a rule edit made detection worse and test-replay proved it.",
+        "- Use it when a rule edit made detection worse and the rule examiner proved it.",
         "- Do NOT use it to write a wording that never existed: call codex_rule_write.",
         "- Do NOT use it to see which version to go back to: call codex_history first.",
         "",

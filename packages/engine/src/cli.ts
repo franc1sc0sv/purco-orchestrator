@@ -6,7 +6,7 @@ import { describeStep, planSteps } from "./plan.ts";
 import { phaseGate } from "./gates.ts";
 import { Store } from "./store.ts";
 import { checkMcp } from "./check.ts";
-import { startMonitor } from "./monitor.ts";
+import { startMonitor } from "./monitor-server.ts";
 import { PHASES, SPIKE_PHASES, type Phase, type RunConfig } from "./types.ts";
 import { isWorkflowName, WORKFLOWS, type WorkflowName } from "./workflows.ts";
 
@@ -35,10 +35,14 @@ purco-orchestrate monitor [--port <n>]
   --focus <text>       test workflow: what the operation must prove, one line each
   --scope <name>       test step: backend or frontend, default from the changed files
   --test-depth <name>  quick or full. Quick skips mutation and pruning. Default:
-                       quick in the ticket workflow, full in the test workflow
+                       the ticket's size (S and M quick, L full) in the ticket
+                       workflow, full in the test workflow
+  --test-mode <name>   write (default) or harden. Harden runs mutants against the
+                       existing tests of the changed files and adds tests only for
+                       survivors. A test-mode.txt file in the context pack sets it
+                       per ticket
   --worktree <path>    default: the worktree whose branch matches the ticket
   --model <id>         override every role's model; default is per role
-  --budget <usd>       abort the run when the total cost passes this
   --resume             skip every phase this run already finished
   --max-turns <n>      per phase, default 200
   --dry-run            print the plan and exit
@@ -178,8 +182,6 @@ const main = async (): Promise<void> => {
     runId,
     phases,
     modelOverride: typeof flags.model === "string" ? flags.model : undefined,
-    budgetUsd:
-      typeof flags.budget === "string" ? Number(flags.budget) : undefined,
     resume: flags.resume === true,
     maxTurnsPerPhase:
       typeof flags["max-turns"] === "string" ? Number(flags["max-turns"]) : 200,
@@ -203,18 +205,23 @@ const main = async (): Promise<void> => {
         : workflow === "test"
           ? "full"
           : "quick",
+    testMode:
+      flags["test-mode"] === "write" || flags["test-mode"] === "harden"
+        ? flags["test-mode"]
+        : undefined,
+    testDepthExplicit:
+      flags["test-depth"] === "quick" || flags["test-depth"] === "full",
   };
 
   process.stderr.write(
     [
       `ticket    ${config.ticket}`,
       `workflow  ${config.workflow}`,
-      `tests     Test Forge at ${config.testDepth} depth`,
+      `tests     Test Forge at ${config.testDepthExplicit || workflow !== "ticket" ? `${config.testDepth} depth` : "the depth of the ticket size"}`,
       `worktree  ${config.worktree}`,
       `pack      ${config.contextPack}`,
       `phases    ${config.phases.join(" > ")}`,
       `model     ${config.modelOverride ?? "per role"}`,
-      `budget    ${config.budgetUsd ? `$${config.budgetUsd}` : "none"}`,
       `writes    ${config.autoApproveWrites ? "enabled" : "read-only"}`,
       `run dir   ${config.runDir}`,
       "",

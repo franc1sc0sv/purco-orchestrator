@@ -18,10 +18,13 @@ import { projectKeyOf } from "../../infrastructure/project.ts";
 import { dirname, join, relative, sep } from "node:path";
 import type { Mutant } from "test-forge-contracts/mutation";
 
+export type LineRange = readonly [number, number];
+
 export type MutationGenerateInput = {
   cwd: string;
   files: readonly string[];
   runId?: number | undefined;
+  lines?: Readonly<Record<string, readonly LineRange[]>> | undefined;
 };
 
 export type MutationGenerateResult = {
@@ -120,13 +123,23 @@ const persist = async (
   );
 };
 
+const inRanges = (
+  ranges: readonly LineRange[] | undefined,
+  lineNo: number,
+): boolean =>
+  ranges === undefined ||
+  ranges.some(([start, end]) => lineNo >= start && lineNo <= end);
+
 export const mutationGenerate = async ({
   cwd,
   files,
   runId,
+  lines: changedLines,
 }: MutationGenerateInput): Promise<MutationGenerateResult> => {
   const root = await repoRoot(cwd);
   const sources = readTargets(root, files);
+  const rangesOf = (target: string): readonly LineRange[] | undefined =>
+    changedLines === undefined ? undefined : (changedLines[target] ?? []);
   const texts = [...sources.values()];
   const enums = buildEnumIndex([...texts, ...importedTexts(root, sources)]);
   const literals = collectLiteralPool(texts);
@@ -135,6 +148,7 @@ export const mutationGenerate = async ({
   const seen = new Set<string>();
   for (const [target, text] of sources) {
     const lines = text.split("\n");
+    const ranges = rangesOf(target);
     let openGenericDepth = 0;
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
@@ -146,6 +160,7 @@ export const mutationGenerate = async ({
         literals,
       };
       openGenericDepth = genericDepthAfter(line, openGenericDepth);
+      if (!inRanges(ranges, index + 1)) continue;
       for (const mutation of mutateLine(line, context)) {
         const key = mutantKey(target, index + 1, mutation);
         if (seen.has(key)) continue;

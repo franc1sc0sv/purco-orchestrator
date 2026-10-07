@@ -4,6 +4,7 @@ import type {
   HookInput,
   HookJSONOutput,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { WorkerMeter } from "./meter.ts";
 import { touchesProtectedFile } from "./protected-files.ts";
 import type { Scratchpad } from "./scratchpad.ts";
 import type { SubagentTracker } from "./tracker.ts";
@@ -64,7 +65,7 @@ export const isReadOnlySql = (sql: string): boolean => {
   return true;
 };
 
-const describeInput = (input: Record<string, unknown>): string => {
+export const describeInput =(input: Record<string, unknown>): string => {
   const interesting = [
     "command",
     "file_path",
@@ -90,8 +91,10 @@ export const buildHooks = (deps: {
   scratchpad: Scratchpad;
   tracker: SubagentTracker;
   recordFileWritten: (file: string) => void;
+  refuse?: (tool: string, input: Record<string, unknown>) => string | undefined;
+  meter?: WorkerMeter;
 }): Partial<Record<HookEvent, HookCallbackMatcher[]>> => {
-  const { scratchpad, tracker, recordFileWritten } = deps;
+  const { scratchpad, tracker, recordFileWritten, refuse, meter } = deps;
 
   const onPreToolUse = async (
     input: HookInput,
@@ -116,6 +119,17 @@ export const buildHooks = (deps: {
         );
       }
     }
+    const refusal = refuse?.(input.tool_name, input.tool_input as Record<string, unknown>);
+    if (refusal) {
+      scratchpad.record(
+        tracker.active(),
+        tracker.currentPhase(),
+        "permission_denied",
+        `blocked ${input.tool_name}: ${refusal}`,
+        { tool: input.tool_name },
+      );
+      return deny(refusal);
+    }
     if (touchesProtectedFile(input.tool_input as Record<string, unknown>)) {
       scratchpad.record(
         tracker.active(),
@@ -128,6 +142,7 @@ export const buildHooks = (deps: {
         "That file is protected: dotenv files, keys and credentials are never read in an orchestrated run. If you need a value from it, escalate at level human.",
       );
     }
+    meter?.toolStart(input.tool_name, input.tool_input as Record<string, unknown>);
     const detail = describeInput(input.tool_input as Record<string, unknown>);
     scratchpad.record(
       tracker.active(),
@@ -144,6 +159,7 @@ export const buildHooks = (deps: {
     toolUseId: string | undefined,
   ): Promise<HookJSONOutput> => {
     if (input.hook_event_name !== "PostToolUse") return PROCEED;
+    meter?.toolEnd(input.tool_name, input.tool_input as Record<string, unknown>);
     if (WRITING_TOOLS.has(input.tool_name)) {
       const file = (input.tool_input as { file_path?: unknown }).file_path;
       if (typeof file === "string" && file.length > 0) recordFileWritten(file);
@@ -164,6 +180,7 @@ export const buildHooks = (deps: {
   ): Promise<HookJSONOutput> => {
     if (input.hook_event_name !== "PostToolUseFailure") return PROCEED;
     tracker.countFailure();
+    meter?.toolEnd(input.tool_name, input.tool_input as Record<string, unknown>);
     const agent = tracker.active();
     const raw = (input as { error?: unknown }).error;
     const reason =

@@ -1,10 +1,9 @@
-import { all, one, openDb } from "../../infrastructure/db/connection.ts";
+import { all, openDb } from "../../infrastructure/db/connection.ts";
 import type {
   FindingStatus,
   RecordedVerdict,
 } from "../../infrastructure/db/rows.ts";
 import { resolveProject } from "../../infrastructure/project.ts";
-import type { WarGameStatus } from "test-forge-contracts/board";
 import type { Severity } from "test-forge-contracts/codex";
 import type { ExitKind } from "test-forge-contracts/gates";
 import type { Scope } from "test-forge-contracts/project";
@@ -37,15 +36,6 @@ type VerdictSummaryRow = {
   created_at: string;
 };
 
-type ScenarioRow = {
-  id: number;
-  squad: string;
-  post: string;
-  aspect: string;
-  status: WarGameStatus;
-  root_cause: string;
-  created_at: string;
-};
 
 export const findingKnown = async ({ cwd, fingerprint }: FindingKnownInput) => {
   const db = openDb();
@@ -71,19 +61,13 @@ export const findingKnown = async ({ cwd, fingerprint }: FindingKnownInput) => {
     [projectKey, fingerprint],
   );
 
-  const scenario = one<ScenarioRow>(
-    db,
-    `SELECT id, squad, post, aspect, status, root_cause, created_at
-       FROM war_games WHERE project_key = ? AND scenario_key = ?`,
-    [projectKey, fingerprint],
-  );
 
   const latest = occurrences[0];
 
   return {
     projectKey,
     fingerprint,
-    known: occurrences.length > 0 || scenario !== null,
+    known: occurrences.length > 0,
     occurrenceCount: occurrences.length,
     lastStatus: latest?.status ?? null,
     lastSeenAt: latest?.created_at ?? null,
@@ -108,17 +92,5 @@ export const findingKnown = async ({ cwd, fingerprint }: FindingKnownInput) => {
       verdict: row.verdict,
       createdAt: row.created_at,
     })),
-    warGame:
-      scenario === null
-        ? null
-        : {
-            scenarioId: scenario.id,
-            squad: scenario.squad,
-            post: scenario.post,
-            aspect: scenario.aspect,
-            status: scenario.status,
-            rootCause: scenario.root_cause,
-            createdAt: scenario.created_at,
-          },
   };
 };

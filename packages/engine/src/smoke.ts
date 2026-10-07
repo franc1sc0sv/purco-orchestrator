@@ -109,6 +109,7 @@ for await (const message of query({
 }
 
 await scratchpad.close();
+escalations.persist();
 
 const events = fs
   .readFileSync(path.join(runDir, "events.jsonl"), "utf8")

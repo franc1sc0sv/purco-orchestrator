@@ -12,11 +12,11 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": [
     "packages/contracts/src/**/*.ts",
-    "packages/mcp/src/**/*.ts",
-    "packages/runner/src/**/*.ts"
+    "packages/mcp/src/**/*.ts"
   ]
 }

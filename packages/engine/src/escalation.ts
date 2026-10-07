@@ -7,8 +7,8 @@ import type { Scratchpad } from "./scratchpad.ts";
 export const RETRY_PROMOTION_THRESHOLD = 3;
 
 export type EscalationHandlers = {
-  askOrchestrator: (question: string, context: string) => Promise<string>;
-  askHuman: (question: string, context: string) => Promise<string>;
+  askOrchestrator: (question: string, context: string, from: string) => Promise<string>;
+  askHuman: (question: string, context: string, from: string) => Promise<string>;
 };
 
 export class EscalationRegistry {
@@ -123,8 +123,8 @@ export class EscalationRegistry {
 
     const answer =
       escalation.level === "human"
-        ? await this.handlers.askHuman(question, context)
-        : await this.handlers.askOrchestrator(question, context);
+        ? await this.handlers.askHuman(question, context, escalation.from)
+        : await this.handlers.askOrchestrator(question, context, escalation.from);
 
     this.resolve(
       escalation.id,

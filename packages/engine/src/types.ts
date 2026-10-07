@@ -3,9 +3,10 @@ export const PHASES = [
   "grill",
   "plan",
   "build",
+  "static",
   "test",
   "verify",
-  "static",
+  "record",
   "review",
   "survey",
   "audit",
@@ -13,6 +14,60 @@ export const PHASES = [
 ] as const;
 
 export type Phase = (typeof PHASES)[number];
+
+export const STAGES = [
+  "plan",
+  "implementation",
+  "testing",
+  "verification",
+] as const;
+
+export type Stage = (typeof STAGES)[number];
+
+export const STAGE_OF_PHASE: Partial<Record<Phase, Stage>> = {
+  intake: "plan",
+  grill: "plan",
+  plan: "plan",
+  build: "implementation",
+  static: "implementation",
+  test: "testing",
+  verify: "verification",
+  record: "verification",
+  review: "verification",
+};
+
+export const stageOfKey = (key: string): Stage | undefined => {
+  const phase = key.split(/[:#]/)[0] ?? "";
+  return STAGE_OF_PHASE[phase as Phase];
+};
+
+export const STEP_STATUSES = [
+  "pending",
+  "running",
+  "waiting",
+  "halted",
+  "done",
+  "failed",
+  "skipped",
+] as const;
+
+export type StepStatus = (typeof STEP_STATUSES)[number];
+
+export type PipelineStep = {
+  key: string;
+  baseKey: string;
+  attempt: number;
+  status: StepStatus;
+  reason?: string;
+  startedAt?: string;
+  endedAt?: string;
+};
+
+export type PipelineStage = {
+  stage: Stage;
+  status: StepStatus;
+  steps: PipelineStep[];
+};
 
 export const ROLES = [
   "intake",
@@ -26,7 +81,26 @@ export const ROLES = [
   "surveyor",
   "checker",
   "synthesist",
+  "mapper",
+  "test-author",
+  "inspector",
+  "defect-verifier",
+  "defect-skeptic",
+  "survivor-analyst",
+  "equivalence-hunter",
 ] as const;
+
+export const FORGE_ROLES = [
+  "mapper",
+  "test-author",
+  "inspector",
+  "defect-verifier",
+  "defect-skeptic",
+  "survivor-analyst",
+  "equivalence-hunter",
+] as const satisfies readonly RoleName[];
+
+export type ForgeRole = (typeof FORGE_ROLES)[number];
 
 export type RoleName = (typeof ROLES)[number];
 
@@ -37,6 +111,7 @@ export const PHASE_ROLE: Record<Phase, RoleName> = {
   build: "builder",
   test: "tester",
   verify: "verifier",
+  record: "verifier",
   static: "fixer",
   review: "reviewer",
   survey: "surveyor",
@@ -142,6 +217,8 @@ export type PhaseOutcome = {
   model?: string;
   escalations: string[];
   errors: string[];
+  result?: StepResult;
+  halt?: string;
 };
 
 export type RunConfig = {
@@ -154,7 +231,6 @@ export type RunConfig = {
   phases: Phase[];
   modelOverride?: string;
   maxTurnsPerPhase: number;
-  budgetUsd?: number;
   resume: boolean;
   autoApproveWrites: boolean;
   nonInteractive: boolean;
@@ -165,6 +241,8 @@ export type RunConfig = {
   testFocus?: string;
   testScope?: "backend" | "frontend";
   testDepth: "full" | "quick";
+  testMode?: "write" | "harden";
+  testDepthExplicit: boolean;
 };
 
 export const SITE_AXES = ["A", "B", "C", "D", "E"] as const;
@@ -224,6 +302,32 @@ export type StoredPhase = {
   model?: string;
   startedAt?: string;
   endedAt?: string;
+};
+
+export const OUTCOME_KINDS = [
+  "delivered",
+  "blocked",
+  "disputed",
+  "failed",
+] as const;
+
+export type OutcomeKind = (typeof OUTCOME_KINDS)[number];
+
+export type ResultFinding = {
+  title: string;
+  severity: string;
+  location: string;
+};
+
+export type StepResult = {
+  status: OutcomeKind;
+  summary: string;
+  outputPath?: string;
+  produced: string[];
+  openQuestions: number;
+  evidence?: string;
+  counts?: Record<string, number>;
+  findings?: ResultFinding[];
 };
 
 export type HumanItemKind = "question" | "gate" | "sign";

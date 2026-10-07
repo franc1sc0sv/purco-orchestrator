@@ -34,7 +34,7 @@ export const newTotals = (): StreamTotals => ({
   errors: [],
 });
 
-const readUsage = (raw: unknown): TokenUsage => {
+export const readUsage =(raw: unknown): TokenUsage => {
   const u = (raw ?? {}) as Record<string, unknown>;
   const n = (key: string): number =>
     typeof u[key] === "number" ? (u[key] as number) : 0;

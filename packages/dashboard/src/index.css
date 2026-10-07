@@ -1,0 +1,183 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@xyflow/react/dist/style.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --blue-1: oklch(0.93 0.03 255);
+  --blue-2: oklch(0.82 0.08 255);
+  --blue-3: oklch(0.7 0.14 255);
+  --blue-4: oklch(0.58 0.2 255);
+  --blue-5: oklch(0.45 0.22 258);
+  --primary: var(--blue-5);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: var(--blue-5);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: var(--blue-3);
+  --chart-1: var(--blue-5);
+  --chart-2: var(--blue-4);
+  --chart-3: var(--blue-3);
+  --chart-4: var(--blue-2);
+  --chart-5: var(--blue-1);
+  --state-running: var(--blue-5);
+  --state-tool: var(--blue-4);
+  --state-waiting: var(--blue-4);
+  --state-done: var(--blue-2);
+  --state-stuck: var(--blue-5);
+  --state-halted: var(--blue-5);
+  --state-failed: var(--blue-5);
+  --state-burn: var(--blue-3);
+  --state-idle: oklch(0.556 0 0);
+  --state-pending: oklch(0.708 0 0);
+  --state-skipped: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --blue-1: oklch(0.38 0.08 255);
+  --blue-2: oklch(0.5 0.13 255);
+  --blue-3: oklch(0.6 0.17 255);
+  --blue-4: oklch(0.7 0.18 255);
+  --blue-5: oklch(0.8 0.14 255);
+  --primary: var(--blue-5);
+  --primary-foreground: oklch(0.145 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: var(--blue-5);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: var(--blue-3);
+  --chart-1: var(--blue-5);
+  --chart-2: var(--blue-4);
+  --chart-3: var(--blue-3);
+  --chart-4: var(--blue-2);
+  --chart-5: var(--blue-1);
+  --state-running: var(--blue-5);
+  --state-tool: var(--blue-4);
+  --state-waiting: var(--blue-4);
+  --state-done: var(--blue-2);
+  --state-stuck: var(--blue-5);
+  --state-halted: var(--blue-5);
+  --state-failed: var(--blue-5);
+  --state-burn: var(--blue-3);
+  --state-idle: oklch(0.55 0 0);
+  --state-pending: oklch(0.4 0 0);
+  --state-skipped: oklch(0.4 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-blue-1: var(--blue-1);
+  --color-blue-2: var(--blue-2);
+  --color-blue-3: var(--blue-3);
+  --color-blue-4: var(--blue-4);
+  --color-blue-5: var(--blue-5);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-state-running: var(--state-running);
+  --color-state-waiting: var(--state-waiting);
+  --color-state-stuck: var(--state-stuck);
+  --color-state-halted: var(--state-halted);
+  --color-state-failed: var(--state-failed);
+  --color-state-done: var(--state-done);
+  --color-state-idle: var(--state-idle);
+  --color-state-pending: var(--state-pending);
+  --color-state-skipped: var(--state-skipped);
+  --color-state-tool: var(--state-tool);
+  --color-state-burn: var(--state-burn);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-stroke-default: var(--muted-foreground);
+  --xy-node-border-radius-default: var(--radius);
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes node-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--tone) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in oklch, var(--tone) 0%, transparent);
+  }
+}
+
+.animate-soft-pulse {
+  animation: soft-pulse 1.6s ease-in-out infinite;
+}
+
+.animate-node-glow {
+  animation: node-glow 1.8s ease-out infinite;
+}

@@ -1,13 +1,7 @@
 import fs from "node:fs";
-import { Store } from "./store.ts";
-import http from "node:http";
 import path from "node:path";
-import { MONITOR_PAGE } from "./monitor-page.ts";
-
-const GAF = path.join(
-  process.env.HOME ?? "",
-  "projects/purco-projects/general-access-files",
-);
+import { GAF } from "./dashboard-data.ts";
+import { Store } from "./store.ts";
 
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -228,7 +222,7 @@ const readMailbox = (ticket: string): MailboxView[] => {
   const dbPath = path.join(GAF, ticket, "orchestrator.sqlite");
   if (!fs.existsSync(dbPath)) return [];
   try {
-    const store = new Store(dbPath, "");
+    const store = Store.openReadOnly(dbPath, ticket);
     const rows = store.allQuestions();
     store.close();
     return rows as MailboxView[];
@@ -258,57 +252,4 @@ export const collectRuns = (): RunView[] => {
     }
   }
   return runs.sort((a, b) => b.lastEventAt.localeCompare(a.lastEventAt));
-};
-
-export const startMonitor = (port: number): void => {
-  const server = http.createServer((request, response) => {
-    const url = new URL(request.url ?? "/", "http://localhost");
-
-    if (url.pathname === "/api/state") {
-      const runs = collectRuns();
-      const mailbox = collectMailbox();
-      const body = JSON.stringify({
-        generatedAt: new Date().toISOString(),
-        mailbox,
-        openQuestions: mailbox.filter((q) => q.answer === null || q.answer === undefined)
-          .length,
-        activeOrchestrators: runs.filter((run) => run.active).length,
-        totalRuns: runs.length,
-        liveSubagents: runs
-          .filter((run) => run.active)
-          .reduce((sum, run) => sum + run.subagentCount, 0),
-        totalCostUsd: runs.reduce((sum, run) => sum + run.costUsd, 0),
-        openDecisions: runs.reduce(
-          (sum, run) =>
-            sum +
-            run.decisions.filter((d) => d.resolvedBy === undefined).length,
-          0,
-        ),
-        runs,
-      });
-      response.writeHead(200, {
-        "content-type": "application/json",
-        "cache-control": "no-store",
-      });
-      response.end(body);
-      return;
-    }
-
-    if (url.pathname === "/") {
-      response.writeHead(200, {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-      });
-      response.end(MONITOR_PAGE);
-      return;
-    }
-
-    response.writeHead(404, { "content-type": "text/plain" });
-    response.end("not found");
-  });
-
-  server.listen(port, "127.0.0.1", () => {
-    process.stdout.write(`monitor http://127.0.0.1:${port}\n`);
-    process.stdout.write(`watching ${GAF}/*/orchestrator-runs\n`);
-  });
 };

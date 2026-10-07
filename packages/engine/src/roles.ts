@@ -2,11 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
+import type { Size } from "./size.ts";
 import { ORCH_TOOL_NAMES } from "./tools.ts";
 import { LINEAR_TOOL_NAMES } from "./linear-tools.ts";
 import { PLAYWRIGHT_TOOLS } from "./mcp-servers.ts";
 import { SPIKE_TOOL_NAMES } from "./spike-tools.ts";
 import { ALL_PG_TOOL_NAMES } from "./postgres-tools.ts";
+import { forgeTools } from "./forge-server.ts";
 import { MODELS, type Phase, type RoleName } from "./types.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +55,8 @@ export type RoleSpec = {
   needsLinear?: boolean;
   needsPostgres?: boolean;
   needsSpike?: boolean;
+  needsForge?: boolean;
+  testFilesOnly?: boolean;
   effort: "low" | "medium" | "high" | "xhigh" | "max";
   maxTurns: number;
 };
@@ -98,7 +102,7 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
   },
   builder: {
     role: "builder",
-    model: MODELS.opus,
+    model: MODELS.sonnet,
     phase: "build",
     description:
       "Implements exactly one brief, inside its scope boundary. Never commits and never runs the test suite.",
@@ -120,14 +124,15 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
   },
   tester: {
     role: "tester",
-    model: MODELS.opus,
+    model: MODELS.sonnet,
     phase: "test",
     description:
-      "Writes and runs usecase-level integration tests against the brief, in every flag state. Never fixes the implementation.",
+      "Writes and runs usecase-level integration tests against the brief, in every flag state, when no codex exists for the scope. Never fixes the implementation.",
     tools: [...WRITE_TOOLS, ...ALL_PG_TOOL_NAMES],
     writes: true,
     needsPostgres: true,
-    effort: "high",
+    testFilesOnly: true,
+    effort: "medium",
     maxTurns: 150,
   },
   verifier: {
@@ -168,7 +173,7 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
   },
   checker: {
     role: "checker",
-    model: MODELS.opus,
+    model: MODELS.sonnet,
     phase: "audit",
     description:
       "Re-derives every finding from the code without the surveyor's reasoning, and rejects whatever it cannot reproduce.",
@@ -191,9 +196,152 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
     effort: "high",
     maxTurns: 100,
   },
+  mapper: {
+    role: "mapper",
+    model: MODELS.sonnet,
+    phase: "test",
+    description:
+      "Maps the changed production code: the unit contract, the coverage matrix, the effect closure and one test file per unit. Writes no test.",
+    tools: [
+      ...AUDIT_TOOLS,
+      "Write",
+      ...forgeTools(
+        "ast_file_facts",
+        "codex_rules_for",
+        "codex_rule_get",
+        "ledger_matrix_upsert",
+        "closure_compute",
+        "closure_unresolved",
+        "closure_resolve_batch",
+        "gates_status",
+      ),
+    ],
+    writes: true,
+    needsForge: true,
+    effort: "medium",
+    maxTurns: 80,
+  },
+  "test-author": {
+    role: "test-author",
+    model: MODELS.sonnet,
+    phase: "test",
+    description:
+      "Owns one test file. Writes the tests for its matrix rows and focus lines, runs only that file, and marks the cells it covers. Never edits production code.",
+    tools: [
+      ...WRITE_TOOLS,
+      ...forgeTools(
+        "codex_rule_get",
+        "codex_fixture_list",
+        "ast_file_facts",
+        "ledger_matrix_upsert",
+        "ledger_verdict_record_batch",
+      ),
+    ],
+    writes: true,
+    needsForge: true,
+    testFilesOnly: true,
+    effort: "medium",
+    maxTurns: 80,
+  },
+  inspector: {
+    role: "inspector",
+    model: MODELS.sonnet,
+    phase: "test",
+    description:
+      "Judges one test file against each applicable codex rule, one verdict per rule, every answer anchored to a quoted line. Never sees the author's claims.",
+    tools: [
+      ...AUDIT_TOOLS,
+      ...forgeTools(
+        "codex_rule_get",
+        "codex_fixture_list",
+        "ast_check_batch",
+        "ledger_verdict_record_batch",
+        "ledger_finding_upsert_batch",
+      ),
+    ],
+    writes: false,
+    needsForge: true,
+    effort: "medium",
+    maxTurns: 40,
+  },
+  "defect-verifier": {
+    role: "defect-verifier",
+    model: MODELS.sonnet,
+    phase: "test",
+    description:
+      "Rules on one red test: reproduces it alone, walks the execution path, derives the intent from the sources, and records one verdict.",
+    tools: [
+      ...READ_TOOLS,
+      ...forgeTools(
+        "ast_file_facts",
+        "ledger_state",
+        "ledger_finding_known",
+        "ledger_finding_upsert",
+        "ledger_verdict_record",
+        "escalation_raise",
+      ),
+    ],
+    writes: false,
+    needsForge: true,
+    effort: "medium",
+    maxTurns: 60,
+  },
+  "defect-skeptic": {
+    role: "defect-skeptic",
+    model: MODELS.opus,
+    phase: "test",
+    description:
+      "Attacks one confirmed defect: builds the strongest case that it is not a defect, and overturns the verdict when that case holds.",
+    tools: [
+      ...READ_TOOLS,
+      ...forgeTools(
+        "ledger_state",
+        "ledger_finding_known",
+        "ledger_finding_upsert",
+        "ledger_overturn_record",
+      ),
+    ],
+    writes: false,
+    needsForge: true,
+    effort: "high",
+    maxTurns: 40,
+  },
+  "survivor-analyst": {
+    role: "survivor-analyst",
+    model: MODELS.sonnet,
+    phase: "test",
+    description:
+      "Reads the surviving mutants of one production file and files an equivalence claim, or names the coverage hole a new test must close.",
+    tools: [
+      ...AUDIT_TOOLS,
+      ...forgeTools("mutation_survivors", "mutation_equivalence_record", "ast_file_facts"),
+    ],
+    writes: false,
+    needsForge: true,
+    effort: "medium",
+    maxTurns: 60,
+  },
+  "equivalence-hunter": {
+    role: "equivalence-hunter",
+    model: MODELS.opus,
+    phase: "test",
+    description:
+      "Tries to refute each equivalence claim on one production file with a named observable difference and the input that produces it.",
+    tools: [
+      ...AUDIT_TOOLS,
+      ...forgeTools("mutation_survivors", "mutation_equivalence_record", "ast_file_facts"),
+    ],
+    writes: false,
+    needsForge: true,
+    effort: "high",
+    maxTurns: 60,
+  },
 };
 
 export const agentLabel = (role: RoleName): string => `${role.toUpperCase()}-1`;
+
+export const effortFor = (spec: RoleSpec, size?: Size): RoleSpec["effort"] =>
+  spec.role === "reviewer" && size === "S" ? "medium" : spec.effort;
 
 export const modelFor = (spec: RoleSpec, override?: string): string =>
   override ?? spec.model;
@@ -202,6 +350,7 @@ export const buildAgentDefinitions = (
   vars: PromptVars,
   roles: RoleName[],
   override?: string,
+  size?: Size,
 ): Record<string, AgentDefinition> => {
   const definitions: Record<string, AgentDefinition> = {};
   for (const role of roles) {
@@ -214,7 +363,7 @@ export const buildAgentDefinitions = (
       }),
       tools: [...spec.tools, ...ORCH_TOOL_NAMES],
       model: modelFor(spec, override),
-      effort: spec.effort,
+      effort: effortFor(spec, size),
       maxTurns: spec.maxTurns,
     };
   }
