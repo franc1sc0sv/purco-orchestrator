@@ -1,4 +1,5 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { recordEngineLimit } from "./limits.ts";
 import type { Scratchpad } from "./scratchpad.ts";
 import type { SubagentTracker } from "./tracker.ts";
 
@@ -71,6 +72,11 @@ export const handleMessage = (
   totals: StreamTotals,
 ): void => {
   const { scratchpad, tracker } = deps;
+
+  if (message.type === "rate_limit_event") {
+    recordEngineLimit(message.rate_limit_info);
+    return;
+  }
 
   if (message.type === "system") {
     if (message.subtype === "init") {

@@ -249,6 +249,22 @@ export type UsageBlock = {
   models: ModelUsage[];
 };
 
+export type LimitWindow = {
+  pct: number;
+  resetsAt: number;
+  at: number;
+  source: "statusline" | "engine";
+};
+
+export type ModelLimit = LimitWindow & { model: string };
+
+export type PlanLimits = {
+  session?: LimitWindow;
+  weekly?: LimitWindow;
+  weeklyByModel: ModelLimit[];
+  installCommand: string;
+};
+
 export type UsageSnapshot = {
   ready: boolean;
   generatedAt: string;
@@ -257,4 +273,5 @@ export type UsageSnapshot = {
   calendar: UsageTotals;
   days: DayUsage[];
   models: ModelUsage[];
+  limits: PlanLimits;
 };

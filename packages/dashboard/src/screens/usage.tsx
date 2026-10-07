@@ -1,4 +1,5 @@
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { LimitsPanel } from "@/components/limits-panel";
 import { FlowField } from "@/components/flow-field";
 import { Panel } from "@/components/panel";
 import { Card } from "@/components/ui/card";
@@ -51,6 +52,7 @@ export const UsageScreen = ({ usage }: { usage: UsageSnapshot | undefined }) => 
   const days = usage.days.map((day) => ({ ...day, label: dayLabel(day.date) }));
   return (
     <div className="grid gap-3">
+      <LimitsPanel limits={usage.limits} />
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <Card className="relative gap-3 overflow-hidden px-5 py-4">
           {block ? (

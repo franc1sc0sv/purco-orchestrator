@@ -30,3 +30,29 @@ export const formatCountdown = (ms: number): string => {
 };
 
 export const shortFile = (file: string): string => file.split("/").pop() ?? file;
+
+export const formatResetIn = (ms: number): string => {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+};
+
+export const formatResetShort = (ms: number): string => {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+};
+
+export const formatResetAt = (epochMs: number): string =>
+  new Date(epochMs).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+export const formatResetAtShort = (epochMs: number): string =>
+  new Date(epochMs).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+
+export const formatAgo = (ms: number): string => {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 1) return "just now";
+  return `${minutes} min ago`;
+};

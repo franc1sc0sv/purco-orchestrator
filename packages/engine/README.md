@@ -450,6 +450,20 @@ notification and a toast for each new alert. JSON endpoints: `/api/tickets`, `/a
 `/api/history`, `POST /api/tickets/:ticket/alerts/seen`, and the SSE stream `/api/stream?ticket=X`.
 The old page stays at `/legacy`. Set `PURCO_GAF` to read another folder.
 
+### Plan usage limits
+
+The Usage screen and the top bar show the session and weekly plan limits. The data comes from two
+files in `~/.purco-dashboard/`, and no credential is read. `limits-statusline.json` is written by
+`bin/statusline.sh`, which Claude Code runs as its status line. `limits-engine.json` is written by the
+engine when the Agent SDK sends a `rate_limit_event`. The newest value of each window wins, and a
+window whose reset time has passed is hidden. Install the status line once, with this command:
+
+```bash
+jq --arg cmd "bash /Users/franciscohernandez/projects/purco-projects/purco-orchestrator/packages/engine/bin/statusline.sh" '.statusLine = {type: "command", command: $cmd}' ~/.claude/settings.json > ~/.claude/settings.json.tmp && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
+```
+
+The status line needs `jq`. Limit data shows after the first API response of a Claude Code session.
+
 ## The monitor
 
 Serves `http://127.0.0.1:4317` (`--port` to change) and polls every two

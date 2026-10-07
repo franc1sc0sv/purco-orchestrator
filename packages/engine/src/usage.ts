@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { readLimits, type PlanLimits } from "./limits.ts";
 import { priceByFamily } from "./pricing.ts";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -59,6 +60,7 @@ export type UsageSnapshot = {
   calendar: UsageTotals;
   days: DayUsage[];
   models: ModelUsage[];
+  limits: PlanLimits;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -256,6 +258,7 @@ export const summarize = (entries: readonly UsageEntry[], now: number, ready: bo
     calendar: totalsOf(calendar),
     days,
     models: modelsOf(rolling),
+    limits: readLimits(now),
   };
 };
 
@@ -319,7 +322,7 @@ export class UsageMonitor {
   }
 
   snapshot(): UsageSnapshot {
-    return this.current;
+    return { ...this.current, limits: readLimits() };
   }
 
   refresh(): Promise<void> {
