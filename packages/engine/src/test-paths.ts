@@ -28,7 +28,7 @@ const WRAPPERS: Record<string, ReadonlySet<string>> = {
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const EXEC_FLAGS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
 
-const bare = (word: string): string => word.replace(/^["'\\]+|["']+$/g, "");
+const bare = (word: string): string => word.replace(/["'\\]/g, "");
 
 const isGit = (word: string): boolean => /^(.*\/)?git$/.test(bare(word));
 

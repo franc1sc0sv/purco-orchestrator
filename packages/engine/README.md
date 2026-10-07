@@ -319,15 +319,29 @@ The `tester` role runs only when the project has no accepted Test Forge codex fo
 Roles marked `testFilesOnly` (`test-author`, `tester`) are held to test files by a result check, not
 only by tool refusals. A refuse hook blocks `Write`/`Edit` outside test paths and any Bash command
 that runs `git` (also behind `env`, `sudo`, `xargs`, `sh -c` and similar), but Bash can still edit
-files, so the engine audits the worktree. Before the worker starts it snapshots every modified or
-untracked non-test file (`git status --porcelain -z --untracked-files=all`, a sha256 per file and
-the bytes) and the HEAD commit. After the worker ends, for any reason, it snapshots again. A
-non-test file that is new, removed or changed, or a moved HEAD, is a violation. The engine then
-restores those files to their pre-worker bytes, deletes new files, moves HEAD back (`git reset --soft`),
-fails the step with `changed production code: <files>` and raises a `halted` alert. Test files are
-never touched. Parallel test authors share one worktree: if one finds a violation, it restores once
-and every worker still running is failed too, because the engine cannot tell whose edit it was. Files
-ignored by git are not covered.
+files, so the engine audits the worktree. The command filter is best-effort: it cannot be complete
+(`g''it`, `$(echo git)`, `$G`, `\git`), and it only catches the common forms and quote or backslash
+splitting. The result audit is the control. Before the worker starts it snapshots every modified or
+untracked non-test file (`git status --porcelain -z --untracked-files=all`), every git-ignored file
+(`git ls-files --others --ignored --exclude-standard -z`) except the generated directories listed in
+`AUDIT_SKIPPED_DIRECTORIES` (`node_modules`, `.next`, `dist`, `build`, `coverage`, `.turbo`,
+`test-results`, `playwright-report`, `.purco-recording`), `.git/config` and every file under
+`.git/hooks` and `.git/info` (resolved with `git rev-parse --git-common-dir`, so linked worktrees
+work), plus the HEAD commit. Each file gets a sha256 and its mode; the bytes stay in memory only for
+the restore and are never written to disk, logs, alerts or step reasons, which carry paths only.
+After the worker ends, for any reason, it snapshots again. A non-test file that is new, removed or
+changed, or a moved HEAD, is a violation. The engine then restores those files to their pre-worker
+bytes, deletes new files, moves HEAD back (`git reset --soft`), fails the step with
+`changed production code: <files>` and raises a `halted` alert. Test files are never touched.
+
+The audit fails closed. If a snapshot or the restore throws, the step fails with
+`write audit unavailable: <short error>` or `restore failed: <files>`, a `halted` alert titled
+`Write audit failed` is raised and the run stops. A git command that fails on an `index.lock` or
+busy error is retried once after 500 ms before that. Parallel test authors share one worktree: after
+a violation and restore, every worker still running keeps its original baseline, except that the
+restored paths are set to the state they were restored to, so a later change by any worker is still
+detected. Those workers are also marked tainted, so they fail too, because the engine cannot tell
+whose edit it was.
 
 A judging role never receives the builder's reasoning, only the files. When a judge reports a
 defect for the builder, the lead decides whether a repair pass runs: a fresh builder on that one

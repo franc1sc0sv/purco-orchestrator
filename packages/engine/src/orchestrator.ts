@@ -37,9 +37,11 @@ import { testWriteRefusal } from "./test-paths.ts";
 import {
   describeWriteViolation,
   diffWriteSnapshots,
+  rebaseAfterRestore,
   restoreWriteSnapshot,
   takeWriteSnapshot,
   type WriteSnapshot,
+  writeAuditReason,
 } from "./write-audit.ts";
 import { runGrill } from "./grill.ts";
 import {
@@ -723,10 +725,16 @@ export class Orchestrator {
     });
 
     const writeMode = spec.writes && this.config.autoApproveWrites;
-    const audit: WriteAudit | undefined = spec.testFilesOnly
-      ? { before: takeWriteSnapshot(this.config.worktree), tainted: new Set() }
-      : undefined;
-    if (audit) this.activeAudits.add(audit);
+    let audit: WriteAudit | undefined;
+    if (spec.testFilesOnly) {
+      try {
+        audit = { before: takeWriteSnapshot(this.config.worktree), tainted: new Set() };
+      } catch (error) {
+        const summary = `write audit unavailable: ${writeAuditReason(error)}`;
+        return this.failWriteAudit(job, model, totals, meter, summary);
+      }
+      this.activeAudits.add(audit);
+    }
     let toolsProblem: string | undefined;
 
     try {
@@ -778,7 +786,11 @@ export class Orchestrator {
     } catch (error) {
       if (meter?.snapshot().state !== "halted") totals.errors.push(String(error));
     }
-    const violation = audit ? this.finishWriteAudit(audit, job, meter?.id) : undefined;
+    const verdict = audit ? this.finishWriteAudit(audit, job, meter?.id) : undefined;
+    if (verdict?.unavailable !== undefined) {
+      return this.failWriteAudit(job, model, totals, meter, verdict.unavailable);
+    }
+    const violation = verdict?.violation;
     if (toolsProblem !== undefined) {
       return this.failForMissingTools(job, model, totals, meter, toolsProblem);
     }
@@ -861,19 +873,33 @@ export class Orchestrator {
     return outcome;
   }
 
-  private finishWriteAudit(audit: WriteAudit, job: WorkerJob, workerId: string | undefined): string | undefined {
+  private finishWriteAudit(
+    audit: WriteAudit,
+    job: WorkerJob,
+    workerId: string | undefined,
+  ): { violation?: string; unavailable?: string } {
     this.activeAudits.delete(audit);
-    const after = takeWriteSnapshot(this.config.worktree);
-    const own = diffWriteSnapshots(audit.before, after);
+    let own: string[];
+    try {
+      const after = takeWriteSnapshot(this.config.worktree);
+      own = diffWriteSnapshots(audit.before, after);
+    } catch (error) {
+      this.invalidateOverlapping();
+      return { unavailable: `write audit unavailable: ${writeAuditReason(error)}` };
+    }
     if (own.length > 0) {
-      restoreWriteSnapshot(this.config.worktree, audit.before, own);
+      const failed = restoreWriteSnapshot(this.config.worktree, audit.before, own);
+      if (failed.length > 0) {
+        this.invalidateOverlapping(own);
+        return { unavailable: `restore failed: ${describeWriteViolation(failed)}` };
+      }
       for (const other of this.activeAudits) {
         for (const file of own) other.tainted.add(file);
-        other.before = takeWriteSnapshot(this.config.worktree);
+        rebaseAfterRestore(other.before, audit.before, own);
       }
     }
     const files = [...new Set([...audit.tainted, ...own])];
-    if (files.length === 0) return undefined;
+    if (files.length === 0) return {};
     const described = describeWriteViolation(files);
     this.alerts?.raise("halted", `${job.label}: changed production code: ${described}`, {
       workerId,
@@ -881,7 +907,53 @@ export class Orchestrator {
       title: "Test author changed production code",
       dedupeKey: `${job.key}:write-audit`,
     });
-    return described;
+    return { violation: described };
+  }
+
+  private invalidateOverlapping(files: string[] = []): void {
+    for (const other of this.activeAudits) {
+      for (const file of files.length > 0 ? files : ["write audit unavailable"]) other.tainted.add(file);
+    }
+  }
+
+  private failWriteAudit(
+    job: WorkerJob,
+    model: string,
+    totals: StreamTotals,
+    meter: WorkerMeter | undefined,
+    summary: string,
+  ): PhaseOutcome {
+    const outcome = this.failedOutcome(job, model, totals, summary);
+    this.scratchpad.record(ORCHESTRATOR_LABEL, job.phase, "phase_end", `${job.key} failed: ${summary}`, { outcome });
+    this.scratchpad.writeLive();
+    this.journal.end(job.key, "interrupted");
+    meter?.finish("failed");
+    if (meter) this.live.delete(meter.id);
+    this.alerts?.raise("halted", `${job.label}: ${summary}`, {
+      workerId: meter?.id,
+      step: job.key,
+      title: "Write audit failed",
+      dedupeKey: `${job.key}:write-audit-failed`,
+    });
+    this.stop(`${job.key}: ${summary}`);
+    return outcome;
+  }
+
+  private failedOutcome(job: WorkerJob, model: string, totals: StreamTotals, summary: string): PhaseOutcome {
+    return {
+      phase: job.phase,
+      agent: job.label,
+      status: "failed",
+      summary,
+      sessionId: totals.sessionId,
+      costUsd: totals.costUsd,
+      turns: totals.turns,
+      tokens: totals.usage,
+      model,
+      escalations: [],
+      errors: [summary],
+      result: { status: "failed", summary, produced: [], openQuestions: 0, evidence: summary },
+    };
   }
 
   private failForMissingTools(
