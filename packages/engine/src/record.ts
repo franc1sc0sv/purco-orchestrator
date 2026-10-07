@@ -1,13 +1,22 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { ResultFinding, StepResult } from "./types.ts";
 
-export const FLOW_CONFIG = "tests/e2e/flows/recording.config.ts";
-export const STAGING_DIR = "tests/e2e/flows/recording-run";
+export const STAGING_DIR = path.join("tests", "e2e", ".purco-recording");
+export const FLOW_CONFIG = path.join(STAGING_DIR, "recording.config.ts");
+export const PAGES_DIR = path.join("tests", "e2e", "pages");
+export const LIBRARY_DIR = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "recorder",
+  "flows",
+);
 export const FLOW_TIMEOUT_MS = 180_000;
-export const MISSING_LIBRARY_REASON = "flow library missing in the worktree";
+export const MISSING_PAGES_REASON = "worktree has no tests/e2e/pages";
 export const NO_FLOWS_REASON = "verify wrote no recording scripts";
 export const MANIFEST_FILE = path.join("verify", "flows", "flows.json");
 
@@ -73,7 +82,7 @@ export const recordSkipReason = (
   worktree: string,
   pack: string,
 ): string | undefined => {
-  if (!fs.existsSync(path.join(worktree, FLOW_CONFIG))) return MISSING_LIBRARY_REASON;
+  if (!fs.existsSync(path.join(worktree, PAGES_DIR))) return MISSING_PAGES_REASON;
   const manifestFile = path.join(pack, MANIFEST_FILE);
   if (!fs.existsSync(manifestFile)) return NO_FLOWS_REASON;
   const manifest = parseFlowManifest(fs.readFileSync(manifestFile, "utf8"));
@@ -175,10 +184,17 @@ const findVideo = (dir: string): string | undefined => {
   return found ? path.join(dir, found) : undefined;
 };
 
-const stageScript = (worktree: string, source: string): string => {
+const stageLibrary = (worktree: string, libraryDir: string): void => {
   const stagedDir = path.join(worktree, STAGING_DIR);
+  fs.rmSync(stagedDir, { recursive: true, force: true });
   fs.mkdirSync(stagedDir, { recursive: true });
-  const staged = path.join(stagedDir, path.basename(source));
+  for (const name of fs.readdirSync(libraryDir)) {
+    fs.copyFileSync(path.join(libraryDir, name), path.join(stagedDir, name));
+  }
+};
+
+const stageScript = (worktree: string, source: string): string => {
+  const staged = path.join(worktree, STAGING_DIR, path.basename(source));
   fs.copyFileSync(source, staged);
   return path.relative(worktree, staged);
 };
@@ -213,8 +229,6 @@ const recordFlow = async (input: {
     return { entry, status: "passed", video };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
-    fs.rmSync(path.join(worktree, script), { force: true });
-    fs.rmSync(path.join(worktree, STAGING_DIR), { recursive: true, force: true });
   }
 };
 
@@ -257,6 +271,7 @@ export const recordFlows = async (input: {
   pack: string;
   tenant: string;
   execute?: Execute;
+  libraryDir?: string;
   onProgress?: (runs: FlowRun[], total: number, next?: FlowEntry) => void;
 }): Promise<RecordOutcome> => {
   const manifest = parseFlowManifest(
@@ -268,18 +283,23 @@ export const recordFlows = async (input: {
   fs.mkdirSync(videosDir, { recursive: true });
   const runs: FlowRun[] = [];
   const total = manifest.entries.length;
-  for (const entry of manifest.entries) {
-    input.onProgress?.(runs, total, entry);
-    runs.push(
-      await recordFlow({
-        entry,
-        worktree: input.worktree,
-        pack: input.pack,
-        videosDir,
-        tenant: input.tenant,
-        execute: input.execute ?? executeCommand,
-      }),
-    );
+  try {
+    stageLibrary(input.worktree, input.libraryDir ?? LIBRARY_DIR);
+    for (const entry of manifest.entries) {
+      input.onProgress?.(runs, total, entry);
+      runs.push(
+        await recordFlow({
+          entry,
+          worktree: input.worktree,
+          pack: input.pack,
+          videosDir,
+          tenant: input.tenant,
+          execute: input.execute ?? executeCommand,
+        }),
+      );
+    }
+  } finally {
+    fs.rmSync(path.join(input.worktree, STAGING_DIR), { recursive: true, force: true });
   }
   input.onProgress?.(runs, total);
   const result = buildRecordResult(runs, total);

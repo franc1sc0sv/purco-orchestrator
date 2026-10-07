@@ -1,5 +1,6 @@
 import { orchestratorToolsProblem } from "./orch-check.ts";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -26,6 +27,8 @@ import { Watchdog } from "./watchdog.ts";
 import type { CheckOutcome } from "test-forge-contracts/analysis";
 import { buildBrief, extractSubjects, settledDecisionLines } from "./brief.ts";
 import { parseHandoff } from "./handoff.ts";
+import type { PipelineStep } from "./types.ts";
+import { deriveTicketState } from "./dashboard-data.ts";
 import { acquireLease } from "./lease.ts";
 import {
   factsFromCounts,
@@ -66,6 +69,7 @@ import { touchesProtectedFile } from "./protected-files.ts";
 import { ROLE_SPECS, buildAgentDefinitions, effortFor } from "./roles.ts";
 import { Store } from "./store.ts";
 import { testWriteRefusal } from "./test-paths.ts";
+import { describeWriteViolation, diffWriteSnapshots, restoreWriteSnapshot, takeWriteSnapshot } from "./write-audit.ts";
 import {
   MODELS,
   PHASE_ROLE,
@@ -78,13 +82,15 @@ import {
 import {
   FLOW_CONFIG,
   FLOW_TIMEOUT_MS,
-  MISSING_LIBRARY_REASON,
+  LIBRARY_DIR,
+  MISSING_PAGES_REASON,
   NO_FLOWS_REASON,
   buildPlaywrightCommand,
   buildRecordResult,
   parseFlowManifest,
   recordFlows,
   recordSkipReason,
+  STAGING_DIR,
   videoFileName,
   type Execute,
 } from "./record.ts";
@@ -376,6 +382,122 @@ check(
   testWriteRefusal("Bash", { command: "yarn vitest run x && git stash" }, "/repo") !== undefined,
 );
 
+const gitRefused = (command: string): boolean => testWriteRefusal("Bash", { command }, "/repo") !== undefined;
+for (const command of [
+  "git status",
+  "/usr/bin/git log",
+  "env git status",
+  "env -i FOO=1 git status",
+  "env -u HOME git status",
+  "command git status",
+  "sudo git reset --hard",
+  "xargs git add",
+  "ls | xargs -n 1 git rm",
+  "exec git push",
+  "nohup git gc",
+  "time git status",
+  "sh -c \"git stash\"",
+  "bash -lc 'git checkout .'",
+  "eval \"git commit -am x\"",
+  "echo hi; git stash",
+  "yarn vitest run x || git stash",
+  "echo $(git rev-parse HEAD)",
+  "echo `git rev-parse HEAD`",
+  "if true; then git status; fi",
+  "find . -name x -exec git add {} +",
+  "\"git\" status",
+]) {
+  check(`a test author may not run: ${command}`, gitRefused(command));
+}
+for (const command of [
+  "yarn vitest run tests/git-utils.test.ts",
+  "grep -r gitignore .",
+  "cat .gitignore",
+  "echo digit",
+  "npx vitest run src/legit.test.ts",
+  "sh -c \"yarn vitest run tests/git-utils.test.ts\"",
+]) {
+  check(`a test author may run: ${command}`, !gitRefused(command));
+}
+
+section("the write audit");
+
+const auditRepo = fs.mkdtempSync(path.join(tmp, "audit-"));
+const gitIn = (...args: string[]): string =>
+  execFileSync("git", ["-C", auditRepo, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { encoding: "utf8" });
+const writeIn = (file: string, text: string): void => {
+  const absolute = path.join(auditRepo, file);
+  fs.mkdirSync(path.dirname(absolute), { recursive: true });
+  fs.writeFileSync(absolute, text);
+};
+const readIn = (file: string): string => fs.readFileSync(path.join(auditRepo, file), "utf8");
+gitIn("init", "-q");
+writeIn("src/a.ts", "a0\n");
+writeIn("src/b.ts", "b0\n");
+writeIn("tests/a.test.ts", "t0\n");
+gitIn("add", "-A");
+gitIn("commit", "-q", "-m", "base");
+
+const auditBase = takeWriteSnapshot(auditRepo);
+check("a clean tree has no snapshot entries", auditBase.states.size === 0);
+writeIn("tests/a.test.ts", "t1\n");
+writeIn("tests/new.test.ts", "t2\n");
+check(
+  "changing only test files is no violation",
+  diffWriteSnapshots(auditBase, takeWriteSnapshot(auditRepo)).length === 0,
+);
+
+writeIn("src/a.ts", "a1\n");
+writeIn("src/created.ts", "new\n");
+fs.rmSync(path.join(auditRepo, "src/b.ts"));
+const dirty = takeWriteSnapshot(auditRepo);
+check(
+  "a changed, a new and a removed production file are all violations",
+  diffWriteSnapshots(auditBase, dirty).join(",") === "src/a.ts,src/b.ts,src/created.ts",
+);
+restoreWriteSnapshot(auditRepo, auditBase, diffWriteSnapshots(auditBase, dirty));
+check("restore returns the changed file", readIn("src/a.ts") === "a0\n");
+check("restore returns the removed file", readIn("src/b.ts") === "b0\n");
+check("restore deletes the new file", !fs.existsSync(path.join(auditRepo, "src/created.ts")));
+check("restore never touches test files", readIn("tests/a.test.ts") === "t1\n" && readIn("tests/new.test.ts") === "t2\n");
+check("after restore no production violation remains", diffWriteSnapshots(auditBase, takeWriteSnapshot(auditRepo)).length === 0);
+
+writeIn("src/a.ts", "a-user-edit\n");
+writeIn("src/scratch.ts", "user-new\n");
+const withUserWork = takeWriteSnapshot(auditRepo);
+writeIn("tests/a.test.ts", "t3\n");
+check(
+  "a production file modified before the worker and left alone is no violation",
+  diffWriteSnapshots(withUserWork, takeWriteSnapshot(auditRepo)).length === 0,
+);
+writeIn("src/a.ts", "a-worker-edit\n");
+fs.rmSync(path.join(auditRepo, "src/scratch.ts"));
+const workerEdit = takeWriteSnapshot(auditRepo);
+check(
+  "a worker edit over earlier uncommitted work is a violation",
+  diffWriteSnapshots(withUserWork, workerEdit).join(",") === "src/a.ts,src/scratch.ts",
+);
+restoreWriteSnapshot(auditRepo, withUserWork, diffWriteSnapshots(withUserWork, workerEdit));
+check(
+  "restore returns the earlier uncommitted bytes",
+  readIn("src/a.ts") === "a-user-edit\n" && readIn("src/scratch.ts") === "user-new\n",
+);
+
+const beforeCommit = takeWriteSnapshot(auditRepo);
+gitIn("add", "src/a.ts");
+gitIn("commit", "-q", "-m", "worker commit");
+const afterCommit = takeWriteSnapshot(auditRepo);
+check("a moved HEAD is a violation", diffWriteSnapshots(beforeCommit, afterCommit).includes("HEAD"));
+restoreWriteSnapshot(auditRepo, beforeCommit, diffWriteSnapshots(beforeCommit, afterCommit));
+check(
+  "restore moves HEAD back and keeps the earlier work",
+  takeWriteSnapshot(auditRepo).head === beforeCommit.head && readIn("src/a.ts") === "a-user-edit\n",
+);
+check(
+  "violations are listed with a cap",
+  describeWriteViolation(["a", "b", "c", "d", "e", "f", "g"]) === "a, b, c, d, e and 2 more",
+);
+
 section("the plan gate");
 
 const packA = path.join(tmp, "pack-a");
@@ -611,7 +733,7 @@ pipelineStore.startPhase("build:a", "BUILDER-a");
 pipelineStore.endPhase({ phase: "build:a", status: "escalated", summary: "no result", ...noTokens });
 pipelineStore.startPhase("build:a#2", "BUILDER-a#2");
 pipelineStore.startPhase("record", "-");
-pipelineStore.endPhase({ phase: "record", status: "skipped", summary: MISSING_LIBRARY_REASON, ...noTokens });
+pipelineStore.endPhase({ phase: "record", status: "skipped", summary: MISSING_PAGES_REASON, ...noTokens });
 const pipeline = pipelineStore.pipeline();
 check("the pipeline lists the four stages in order", pipeline.map((stage) => stage.stage).join(" ") === "plan implementation testing verification");
 check("a finished step is done", pipeline[0]?.steps.find((step) => step.key === "intake")?.status === "done");
@@ -623,7 +745,7 @@ check(
 check("an escalated attempt is a failed step", pipelineStore.stageSteps("implementation").find((step) => step.key === "build:a")?.status === "failed");
 check(
   "the skipped record step keeps its reason",
-  pipeline[3]?.steps.find((step) => step.key === "record")?.reason === MISSING_LIBRARY_REASON,
+  pipeline[3]?.steps.find((step) => step.key === "record")?.reason === MISSING_PAGES_REASON,
 );
 check("a stage with a running step is running", pipeline[1]?.status === "running");
 check("a stage with only pending steps is pending", pipeline[2]?.status === "pending");
@@ -1098,20 +1220,19 @@ check(
   videoFileName({ file: "01-allocate-flag-off.spec.ts", criterion: "c", flagState: "OFF" }) === "01-allocate-flag-off.webm",
 );
 check(
-  "the step is skipped when the flow library is missing",
-  recordSkipReason(recordWorktree, recordPack) === MISSING_LIBRARY_REASON,
+  "the step is skipped when the worktree has no e2e pages",
+  recordSkipReason(recordWorktree, recordPack) === MISSING_PAGES_REASON,
 );
-fs.mkdirSync(path.join(recordWorktree, "tests", "e2e", "flows"), { recursive: true });
-fs.writeFileSync(path.join(recordWorktree, FLOW_CONFIG), "");
+fs.mkdirSync(path.join(recordWorktree, "tests", "e2e", "pages"), { recursive: true });
 check("the step is skipped when verify wrote no manifest", recordSkipReason(recordWorktree, recordPack) === NO_FLOWS_REASON);
 fs.writeFileSync(path.join(recordPack, "verify", "flows", "flows.json"), "[]");
 check("the step is skipped when the manifest is empty", recordSkipReason(recordWorktree, recordPack) === NO_FLOWS_REASON);
 fs.writeFileSync(path.join(recordPack, "verify", "flows", "flows.json"), JSON.stringify(goodManifest));
-check("the step runs when the library and the manifest exist", recordSkipReason(recordWorktree, recordPack) === undefined);
+check("the step runs when the pages and the manifest exist", recordSkipReason(recordWorktree, recordPack) === undefined);
 
 const command = buildPlaywrightCommand({
   worktree: recordWorktree,
-  script: "tests/e2e/flows/recording-run/01-allocate.spec.ts",
+  script: "tests/e2e/.purco-recording/01-allocate.spec.ts",
   outputDir: "/out/videos",
   tenant: "sdi",
 });
@@ -1120,7 +1241,7 @@ check(
   command.command === "npx" &&
     command.cwd === recordWorktree &&
     command.args.join(" ") ===
-      `playwright test tests/e2e/flows/recording-run/01-allocate.spec.ts -c ${FLOW_CONFIG} --output /out/videos`,
+      `playwright test tests/e2e/.purco-recording/01-allocate.spec.ts -c ${FLOW_CONFIG} --output /out/videos`,
 );
 check(
   "the playwright command sets the tenant and the local mode",
@@ -1129,7 +1250,14 @@ check(
 check("each script gets three minutes", command.timeoutMs === FLOW_TIMEOUT_MS && FLOW_TIMEOUT_MS === 180_000);
 
 for (const entry of goodManifest) fs.writeFileSync(path.join(recordPack, "verify", "flows", entry.file), "");
+const stagedAtRun: string[] = [];
 const fakeExecute: Execute = async (run) => {
+  stagedAtRun.push(
+    [
+      fs.existsSync(path.join(recordWorktree, STAGING_DIR, "recording.config.ts")),
+      fs.existsSync(path.join(recordWorktree, STAGING_DIR, path.basename(run.args[2] ?? ""))),
+    ].join(":"),
+  );
   const outputDir = run.args[run.args.length - 1] ?? "";
   if ((run.args[2] ?? "").endsWith("02-list.spec.ts")) return { ok: false, tail: "expected 3 rows, saw 0" };
   fs.mkdirSync(path.join(outputDir, "case"), { recursive: true });
@@ -1169,8 +1297,37 @@ check(
   progress.join("|") === "0/3 01-allocate.spec.ts|1/3 01-allocate-flag-off.spec.ts|2/3 02-list.spec.ts|3/3",
 );
 check(
-  "the staged script is removed from the worktree",
-  !fs.existsSync(path.join(recordWorktree, "tests", "e2e", "flows", "recording-run")),
+  "the library and the script are staged in the worktree while a flow runs",
+  stagedAtRun.length === 3 && stagedAtRun.every((state) => state === "true:true"),
+);
+check(
+  "the staged folder is removed from the worktree after the run",
+  !fs.existsSync(path.join(recordWorktree, STAGING_DIR)),
+);
+check(
+  "the staged library holds every file of the recorder library",
+  fs.readdirSync(LIBRARY_DIR).includes("recording.config.ts") && fs.readdirSync(LIBRARY_DIR).includes("login-as.ts"),
+);
+const gitWorktree = path.join(tmp, "git-worktree");
+fs.mkdirSync(path.join(gitWorktree, "tests", "e2e", "pages"), { recursive: true });
+fs.writeFileSync(path.join(gitWorktree, "tests", "e2e", "pages", "page.ts"), "export {}\n");
+const git = (...args: string[]) => execFileSync("git", ["-C", gitWorktree, ...args], { encoding: "utf8" });
+git("init", "-q");
+git("add", "-A");
+git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init");
+fs.writeFileSync(path.join(recordPack, "verify", "flows", "flows.json"), JSON.stringify(goodManifest));
+await recordFlows({ worktree: gitWorktree, pack: recordPack, tenant: "purco", execute: fakeExecute });
+check("a run leaves the git status of the worktree unchanged", git("status", "--porcelain") === "");
+const throwingExecute: Execute = async () => {
+  throw new Error("boom");
+};
+const thrown = await recordFlows({ worktree: gitWorktree, pack: recordPack, tenant: "purco", execute: throwingExecute }).then(
+  () => false,
+  (error: unknown) => error instanceof Error && error.message === "boom",
+);
+check(
+  "a throwing run still removes the staged folder and leaves the git status unchanged",
+  thrown && !fs.existsSync(path.join(gitWorktree, STAGING_DIR)) && git("status", "--porcelain") === "",
 );
 check(
   "a partial result is blocked and a complete clean one is delivered",
@@ -1542,6 +1699,22 @@ check("a post without a token is refused", checkRequest({ ...goodPost, token: un
 check("a post with a wrong token is refused", checkRequest({ ...goodPost, token: "b".repeat(64) }, guardPort, guardToken) === "bad-token");
 check("a post without json content is refused", checkRequest({ ...goodPost, contentType: "text/plain" }, guardPort, guardToken) === "bad-content-type");
 check("the token is placed in the page head", injectToken("<head></head>", "abc") === '<head><meta name="purco-token" content="abc" /></head>');
+
+const stateStep = (status: PipelineStep["status"], index: number): PipelineStep => ({
+  key: `step-${index}`,
+  baseKey: `step-${index}`,
+  attempt: 1,
+  status,
+});
+const stateOf = (statuses: PipelineStep["status"][], alive: boolean): string =>
+  deriveTicketState({ steps: statuses.map(stateStep), live: [], alive, nowMs: 0 });
+check("a halted step alone gives halted", stateOf(["done", "halted"], false) === "halted");
+check("a failed step alone gives failed", stateOf(["done", "failed"], false) === "failed");
+check("halted and failed together give halted", stateOf(["failed", "halted"], false) === "halted");
+check("halted with a live run and nothing running gives halted", stateOf(["done", "halted"], true) === "halted");
+check("a failed step while another step runs gives running", stateOf(["failed", "running"], true) === "running");
+check("all steps done gives done", stateOf(["done", "skipped"], false) === "done");
+check("pending steps with no run give idle", stateOf(["done", "pending"], false) === "idle");
 
 store.close();
 pipelineStore.close();

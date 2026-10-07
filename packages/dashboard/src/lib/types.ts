@@ -24,7 +24,7 @@ export type StepStatus =
   | "failed"
   | "skipped";
 
-export type TicketState = "running" | "waiting" | "stuck" | "halted" | "done" | "idle";
+export type TicketState = "running" | "waiting" | "stuck" | "halted" | "failed" | "done" | "idle";
 
 export type WorkerState =
   | "starting"

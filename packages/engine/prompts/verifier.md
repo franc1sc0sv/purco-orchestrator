@@ -17,7 +17,7 @@ Write `{{PACK}}/06-verification.md`: what you did, what you saw, the evidence, a
 
 ## Recording scripts
 
-For each acceptance criterion that passes in the live app, write one Playwright recording script to `{{PACK}}/verify/flows/<nn>-<slug>.spec.ts`. A later code step runs it with video on. It adds only the ticket-specific part. The standard flows live in `{{WORKTREE}}/tests/e2e/flows/`; read `README.md` there before you write. Import them with the alias `tests/e2e/flows/<flow>`: `loginAs`, `createClaim`, `openClaim`, `makeAllocation`, `takePayment`, `addInvolvedParty`, `setFlag`, `showTitleCard`. Do not copy their logic into your script.
+For each acceptance criterion that passes in the live app, write one Playwright recording script to `{{PACK}}/verify/flows/<nn>-<slug>.spec.ts`. A later code step runs it with video on. It adds only the ticket-specific part. The standard flows live in the orchestrator, in `{{RECORDER_FLOWS}}`; read `../README.md` there before you write. The record step copies them into the same folder as your script, so import them with `./<flow>`, for example `import { loginAs } from "./login-as"`. The flow files are `login-as`, `create-claim`, `open-claim`, `make-allocation`, `take-payment`, `add-involved-party`, `set-flag`, `title-card`: `loginAs`, `createClaim`, `openClaim`, `makeAllocation`, `takePayment`, `addInvolvedParty`, `setFlag`, `showTitleCard`. Do not copy their logic into your script.
 
 Rules for every script:
 
@@ -26,7 +26,7 @@ Rules for every script:
 - Keep the video near 30 seconds: no long waits, short pauses only.
 - When a feature flag gates the change, write two scripts for the criterion: `<nn>-<slug>-flag-on.spec.ts` with `setFlag(page, FEATURE_FLAGS.X, true)` and `<nn>-<slug>-flag-off.spec.ts` with `setFlag(page, FEATURE_FLAGS.X, false)`. Call `setFlag` before `loginAs`. Use the `FEATURE_FLAGS` constant from `~/types/feature-flags`.
 - When no flag gates the change, write one script and use `flagState` `"NONE"`.
-- A script that you propose for the library, because it is reusable, goes into the report. Do not write into `tests/e2e/flows/`.
+- A script that you propose for the library, because it is reusable, goes into the report. Do not write into the flow library.
 
 Write `{{PACK}}/verify/flows/flows.json`: a list of `{ "file": "<nn>-<slug>[-flag-on|-flag-off].spec.ts", "criterion": "<text>", "flagState": "ON" | "OFF" | "NONE" }`. `file` is a bare file name in that folder. List every script, and only scripts for criteria that pass.
 

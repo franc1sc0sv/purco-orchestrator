@@ -89,7 +89,7 @@ node $ENGINE/bin/purco-orchestrate.js $TICKET \
   the grill; the test depth follows the size (S and M quick, L full) unless `--test-depth` is given.
 - `verify` also writes recording scripts and `verify/flows/flows.json`; `record` then runs them with no
   model and writes the videos to `verify/videos/`. `record` is `skipped` when the ticket worktree has no
-  `tests/e2e/flows/recording.config.ts` or when verify wrote no scripts. A failing script fails the
+  `tests/e2e/pages` or when verify wrote no scripts. The flow library is in the orchestrator (`packages/recorder/flows`); `record` stages it in `tests/e2e/.purco-recording/` of the worktree and deletes it after the run. A failing script fails the
   step. Tell the user which videos exist, and embed them in the PR at ship.
 - Do not pass `--model`. Every role names its own model: Sonnet 5.5 by default, Opus 5.5 for the
   planner, the reviewer, the lead, the defect skeptic and the equivalence hunter.

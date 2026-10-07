@@ -49,17 +49,18 @@ attempt, times and its result as JSON; `Store.pipeline()` returns stages, steps 
 A step is `waiting` while a gate, question or sign item is open for it.
 
 **Live check and record.** The `verify` worker writes one Playwright script per passing acceptance
-criterion to `<pack>/verify/flows/<nn>-<slug>[-flag-on|-flag-off].spec.ts`, built on the purco-web flow
-library (`tests/e2e/flows/`), and lists them in `<pack>/verify/flows/flows.json`
+criterion to `<pack>/verify/flows/<nn>-<slug>[-flag-on|-flag-off].spec.ts`, built on the flow
+library of the orchestrator (`packages/recorder/flows/`, imported as `./<flow>`), and lists them in `<pack>/verify/flows/flows.json`
 (`[{ file, criterion, flagState }]`). The `record` step (`src/record.ts`) reads that manifest. For each
-entry it copies the script into the ticket worktree, runs
-`npx playwright test <script> -c tests/e2e/flows/recording.config.ts --output <scratch>` there with
+run it stages `packages/recorder/flows/*` once into `<worktree>/tests/e2e/.purco-recording/`, copies each script there, and runs
+`npx playwright test <script> -c tests/e2e/.purco-recording/recording.config.ts --output <scratch>` in the worktree with
 `TENANT` (default `purco`) and `envmode=local`, and moves the video to
 `<pack>/verify/videos/<nn>-<slug>[-flag-on|-flag-off].webm`. Each script has 3 minutes. A failing
 script fails the step: the findings name the flow and the error tail. The step result counts `flows`,
 `videos` and `failed`, and is updated after each flow, with the step reason showing "recording 2 of 4".
-The step is `skipped` when the worktree has no `tests/e2e/flows/recording.config.ts` ("flow library
-missing in the worktree") or when verify wrote no scripts. The PR step embeds the videos.
+The staged folder is deleted when the step ends, also after an error, so it never reaches purco-web git.
+The step is `skipped` when the worktree has no `tests/e2e/pages` ("worktree has no tests/e2e/pages") or when verify wrote no scripts.
+`npm run check:recorder -- <worktree>` stages the library into a purco-web worktree, type-checks it there and deletes it. The PR step embeds the videos.
 
 **Lease.** The `leases` table holds one row per ticket: run id, pid, host and a heartbeat written
 every 5 s. A launch takes a free lease, or one whose heartbeat is older than 60 s and whose pid is
@@ -314,6 +315,19 @@ at the end, because work that exists nowhere but in a context is lost work.
 | `reviewer`   | review        | `07-review-findings.md`                         | diff, `02`, `03`, ADRs       |
 
 The `tester` role runs only when the project has no accepted Test Forge codex for the scope.
+
+Roles marked `testFilesOnly` (`test-author`, `tester`) are held to test files by a result check, not
+only by tool refusals. A refuse hook blocks `Write`/`Edit` outside test paths and any Bash command
+that runs `git` (also behind `env`, `sudo`, `xargs`, `sh -c` and similar), but Bash can still edit
+files, so the engine audits the worktree. Before the worker starts it snapshots every modified or
+untracked non-test file (`git status --porcelain -z --untracked-files=all`, a sha256 per file and
+the bytes) and the HEAD commit. After the worker ends, for any reason, it snapshots again. A
+non-test file that is new, removed or changed, or a moved HEAD, is a violation. The engine then
+restores those files to their pre-worker bytes, deletes new files, moves HEAD back (`git reset --soft`),
+fails the step with `changed production code: <files>` and raises a `halted` alert. Test files are
+never touched. Parallel test authors share one worktree: if one finds a violation, it restores once
+and every worker still running is failed too, because the engine cannot tell whose edit it was. Files
+ignored by git are not covered.
 
 A judging role never receives the builder's reasoning, only the files. When a judge reports a
 defect for the builder, the lead decides whether a repair pass runs: a fresh builder on that one

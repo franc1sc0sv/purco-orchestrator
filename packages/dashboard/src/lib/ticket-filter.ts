@@ -9,7 +9,7 @@ export const DEFAULT_TICKET_FILTER: TicketFilter = "live";
 export const isTicketFilter = (value: string | null): value is TicketFilter =>
   TICKET_FILTERS.some((filter) => filter === value);
 
-const LIVE_STATES: ReadonlySet<TicketSummary["state"]> = new Set(["running", "waiting", "stuck", "halted"]);
+const LIVE_STATES: ReadonlySet<TicketSummary["state"]> = new Set(["running", "waiting", "stuck", "halted", "failed"]);
 
 type Classifiable = Pick<TicketSummary, "state" | "openItemCount">;
 

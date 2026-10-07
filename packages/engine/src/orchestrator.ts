@@ -34,6 +34,13 @@ import {
 import { runForge, type ForgeJob, type ForgeResult } from "./forge.ts";
 import { FORGE_SERVER, FORGE_SERVER_NAME } from "./forge-server.ts";
 import { testWriteRefusal } from "./test-paths.ts";
+import {
+  describeWriteViolation,
+  diffWriteSnapshots,
+  restoreWriteSnapshot,
+  takeWriteSnapshot,
+  type WriteSnapshot,
+} from "./write-audit.ts";
 import { runGrill } from "./grill.ts";
 import {
   briefSteps,
@@ -146,7 +153,10 @@ type WorkerJob = {
   parts: string[];
 };
 
+type WriteAudit = { before: WriteSnapshot; tainted: Set<string> };
+
 export class Orchestrator {
+  private readonly activeAudits = new Set<WriteAudit>();
   private readonly scratchpad: Scratchpad;
   private readonly tracker: SubagentTracker;
   private readonly bus: MessageBus;
@@ -713,6 +723,10 @@ export class Orchestrator {
     });
 
     const writeMode = spec.writes && this.config.autoApproveWrites;
+    const audit: WriteAudit | undefined = spec.testFilesOnly
+      ? { before: takeWriteSnapshot(this.config.worktree), tainted: new Set() }
+      : undefined;
+    if (audit) this.activeAudits.add(audit);
     let toolsProblem: string | undefined;
 
     try {
@@ -764,6 +778,7 @@ export class Orchestrator {
     } catch (error) {
       if (meter?.snapshot().state !== "halted") totals.errors.push(String(error));
     }
+    const violation = audit ? this.finishWriteAudit(audit, job, meter?.id) : undefined;
     if (toolsProblem !== undefined) {
       return this.failForMissingTools(job, model, totals, meter, toolsProblem);
     }
@@ -823,6 +838,14 @@ export class Orchestrator {
       result,
     };
 
+    if (violation) {
+      const summary = `changed production code: ${violation}`;
+      outcome.status = "failed";
+      outcome.summary = summary;
+      outcome.errors = [...outcome.errors, summary];
+      outcome.result = { status: "failed", summary, produced: [], openQuestions: 0, evidence: summary };
+    }
+
     this.scratchpad.record(
       ORCHESTRATOR_LABEL,
       job.phase,
@@ -836,6 +859,29 @@ export class Orchestrator {
     if (meter) this.live.delete(meter.id);
     if (haltReason) this.stop(`${job.key} halted: ${haltReason}`);
     return outcome;
+  }
+
+  private finishWriteAudit(audit: WriteAudit, job: WorkerJob, workerId: string | undefined): string | undefined {
+    this.activeAudits.delete(audit);
+    const after = takeWriteSnapshot(this.config.worktree);
+    const own = diffWriteSnapshots(audit.before, after);
+    if (own.length > 0) {
+      restoreWriteSnapshot(this.config.worktree, audit.before, own);
+      for (const other of this.activeAudits) {
+        for (const file of own) other.tainted.add(file);
+        other.before = takeWriteSnapshot(this.config.worktree);
+      }
+    }
+    const files = [...new Set([...audit.tainted, ...own])];
+    if (files.length === 0) return undefined;
+    const described = describeWriteViolation(files);
+    this.alerts?.raise("halted", `${job.label}: changed production code: ${described}`, {
+      workerId,
+      step: job.key,
+      title: "Test author changed production code",
+      dedupeKey: `${job.key}:write-audit`,
+    });
+    return described;
   }
 
   private failForMissingTools(

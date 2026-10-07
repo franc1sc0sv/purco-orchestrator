@@ -119,6 +119,7 @@ export const STATE_TONE: Record<TicketState, Tone> = {
   waiting: "waiting",
   stuck: "stuck",
   halted: "halted",
+  failed: "failed",
   done: "done",
   idle: "idle",
 };
@@ -160,6 +161,7 @@ export const STATE_LABEL: Record<TicketState, string> = {
   waiting: "waiting",
   stuck: "stuck",
   halted: "halted",
+  failed: "failed",
   done: "done",
   idle: "idle",
 };

@@ -31,6 +31,7 @@ export const TICKET_STATES = [
   "waiting",
   "stuck",
   "halted",
+  "failed",
   "done",
   "idle",
 ] as const;
@@ -168,7 +169,7 @@ const isStuck = (worker: WorkerRow, nowMs: number): boolean =>
   (worker.state === "thinking" || worker.state === "tool") &&
   nowMs - Date.parse(worker.lastActivityAt) >= stuckLimitMs(worker);
 
-const deriveState = (input: {
+export const deriveTicketState = (input: {
   steps: PipelineStep[];
   live: WorkerRow[];
   alive: boolean;
@@ -179,14 +180,18 @@ const deriveState = (input: {
   const statuses = steps.map((step) => step.status);
   const finished = statuses.every((status) => status === "done" || status === "skipped");
   if (finished) return "done";
-  const halted = statuses.includes("halted") || statuses.includes("failed");
-  if (!alive) return halted ? "halted" : "idle";
+  const settled: TicketState | undefined = statuses.includes("halted")
+    ? "halted"
+    : statuses.includes("failed")
+      ? "failed"
+      : undefined;
+  if (!alive) return settled ?? "idle";
   if (live.some((worker) => isStuck(worker, nowMs))) return "stuck";
   const waiting =
     live.some((worker) => WAITING_STATES.includes(worker.state)) ||
     statuses.includes("waiting");
   if (waiting) return "waiting";
-  if (halted && !statuses.includes("running")) return "halted";
+  if (settled && !statuses.includes("running")) return settled;
   return "running";
 };
 
@@ -215,7 +220,7 @@ const readSummary = (ticket: string, store: Store, nowMs: number): TicketSummary
   ]
     .filter((value): value is string => value !== undefined)
     .sort();
-  const state = deriveState({ steps, live: liveNow, alive, nowMs });
+  const state = deriveTicketState({ steps, live: liveNow, alive, nowMs });
   const startedAt = starts[0] ?? null;
   const endedAt = state === "running" || state === "waiting" || state === "stuck" ? null : (ends[ends.length - 1] ?? null);
   const startMs = startedAt ? Date.parse(startedAt) : nowMs;

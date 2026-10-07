@@ -24,10 +24,12 @@ export type PromptVars = {
   BRIEF: string;
 };
 
-const fill = (template: string, vars: PromptVars): string =>
-  template.replace(/\{\{(\w+)\}\}/g, (_, key: string) =>
-    key in vars ? vars[key as keyof PromptVars] : `{{${key}}}`,
-  );
+const RECORDER_FLOWS = path.join(here, "..", "..", "recorder", "flows");
+
+const fill = (template: string, vars: PromptVars): string => {
+  const values: Record<string, string> = { ...vars, RECORDER_FLOWS };
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => values[key] ?? `{{${key}}}`);
+};
 
 export const loadPrompt = (name: string, vars: PromptVars): string => {
   const body = fs.readFileSync(path.join(PROMPT_DIR, `${name}.md`), "utf8");

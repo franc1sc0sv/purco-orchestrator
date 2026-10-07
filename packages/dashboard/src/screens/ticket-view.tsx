@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { AlertList } from "@/components/alert-list";
 import { Counter } from "@/components/counter";
+import { FailedSteps, failedStepsOf } from "@/components/failed-steps";
 import { DecisionTimeline } from "@/components/decision-timeline";
 import { GateDialog } from "@/components/gate-dialog";
 import { GatePanel } from "@/components/gate-panel";
@@ -67,6 +68,8 @@ export const TicketView = ({ detail, review }: { detail: TicketDetail | undefine
   const dialog = useGateDialog(item?.id, review);
   if (!detail) return <TicketSkeleton />;
   const { summary } = detail;
+  const failedSteps = summary.state === "failed" && !item ? failedStepsOf(detail.pipeline) : [];
+  const compact = item !== undefined || failedSteps.length > 0;
   const running = summary.endedAt === null;
   const elapsed = running && summary.startedAt ? now - Date.parse(summary.startedAt) : summary.elapsedMs;
   return (
@@ -117,12 +120,17 @@ export const TicketView = ({ detail, review }: { detail: TicketDetail | undefine
         <div
           className={cn(
             "grid min-h-0 gap-3",
-            item ? "grid-rows-[9rem_minmax(0,2fr)_minmax(0,3fr)]" : "grid-rows-[minmax(0,5fr)_minmax(0,4fr)]",
+            compact ? "grid-rows-[9rem_minmax(0,2fr)_minmax(0,3fr)]" : "grid-rows-[minmax(0,5fr)_minmax(0,4fr)]",
           )}
         >
           {item ? (
             <Panel title={detail.items.length > 1 ? `Waiting for you (${detail.items.length})` : "Waiting for you"}>
               <GatePanel item={item} count={detail.items.length} onReview={() => dialog.setOpen(true)} />
+            </Panel>
+          ) : null}
+          {failedSteps.length > 0 ? (
+            <Panel title={`Failed steps (${failedSteps.length})`}>
+              <FailedSteps steps={failedSteps} />
             </Panel>
           ) : null}
           <Panel title="Alerts">
