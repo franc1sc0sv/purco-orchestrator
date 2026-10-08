@@ -837,6 +837,16 @@ export class Store {
     };
   }
 
+  private expireOrphanQuestions(at: string): void {
+    this.db
+      .prepare(
+        `update questions
+            set answer = 'expired: the engine process that asked it stopped', answered_at = ?, answered_by = 'engine'
+          where answered_at is null and at < ? and coalesce(payload_json, '') not like '%"grill":true%'`,
+      )
+      .run(at, at);
+  }
+
   takeLease(
     input: { pid: number; host: string; now: Date },
     mayTake: (held: LeaseRow) => boolean,
@@ -862,6 +872,7 @@ export class Store {
           )
           .run(held.runId);
       }
+      if (held) this.expireOrphanQuestions(at);
       this.db
         .prepare(
           `insert into leases (ticket, run_id, pid, host, heartbeat_at, started_at)
