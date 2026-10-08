@@ -75,6 +75,6 @@ export const testWriteRefusal = (
   if (forgeDir !== undefined && resolved.startsWith(path.resolve(forgeDir) + path.sep) && !target.includes("..")) {
     return undefined;
   }
-  if (isTestPath(resolved)) return undefined;
+  if (resolved.startsWith(path.resolve(root) + path.sep) && isTestPath(resolved)) return undefined;
   return `A test author writes test files only. "${target}" is production code: report the defect in your handoff instead.`;
 };
