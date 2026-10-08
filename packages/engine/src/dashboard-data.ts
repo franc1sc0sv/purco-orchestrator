@@ -413,9 +413,11 @@ const readTests = (store: Store): TestsView => {
   const line = store.latestForgeGateLine() ?? "";
   const note = store.latestForgeNote();
   const jobs = new Map<string, ForgeJobView>();
+  const processStart = store.lease()?.startedAt ?? "";
   for (const row of store.eventsOfKind("forge_job")) {
     const job = parseData(row.data) as unknown as ForgeJobView;
-    jobs.set(job.id, job);
+    const orphan = job.state === "running" && job.startedAt < processStart;
+    jobs.set(job.id, orphan ? { ...job, state: "failed", endedAt: processStart } : job);
   }
   return {
     planned: [...planned.values()].sort((a, b) => a.id - b.id),
