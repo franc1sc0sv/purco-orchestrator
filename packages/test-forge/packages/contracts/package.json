@@ -14,6 +14,7 @@
     "./escalation": "./src/escalation.ts",
     "./mutation": "./src/mutation.ts",
     "./campaign": "./src/campaign.ts",
-    "./listing": "./src/listing.ts"
+    "./listing": "./src/listing.ts",
+    "./stryker": "./src/stryker.ts"
   }
 }

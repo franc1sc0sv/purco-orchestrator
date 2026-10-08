@@ -20,25 +20,19 @@ Options: `--workflow`, `--phases`, `--worktree`, `--model`, `--resume`, `--max-t
 `--dry-run`, `--no-write`, `--non-interactive`, `--ask-human`, `--run-id`, `--mailbox-db`,
 `--config-dir`, `--targets`, `--focus`, `--scope`, `--test-depth`, `--test-mode`, `--check-mcp`.
 
-`--test-depth quick` (the ticket default) runs Test Forge without mutation and pruning;
-`--test-depth full` (the default for `--workflow test`) adds mutation on the changed lines and
-pruning. In the ticket workflow the default follows the ticket size (S and M quick, L full), and
-an explicit `--test-depth` always wins.
+Test Forge runs mutants first at every size. It boots the harness, runs Stryker on the existing tests over
+the changed lines, turns every surviving or uncovered mutant into a work item for the test author of the
+covering test file, re-runs only the touched mutants after each author round, and refuses any new test that
+kills no mutant that survived before it. Survivors left after the rounds go to the survivor analyst and the
+equivalence hunter, and the user signs the equivalents. The run is done only when every in-scope mutant is
+killed, killed by timeout, a compile error or a signed equivalent. tsc, lint and the flake probe run once at
+the end, and the inspector sees only new or changed test files. The run writes `mutation-report.md` into
+the run folder of the context pack. `--test-depth` no longer decides whether mutation runs.
 
-`--test-mode write` (the default) maps the change, writes tests and prunes. `--test-mode harden` skips
-map, write and the first inspect. It finds the existing usecase-level test files that import the changed
-production files, records the names of their tests, generates mutants on the changed lines only, runs
-them against those files, runs the survivor analyst and the equivalence hunter, and has test authors add
-tests only to kill survivors in those same files. It then re-runs the mutants, checks the gates, inspects
-only the files that changed and verifies red tests. It never prunes, never creates a test file, and
-restores any test that existed before the run. A `test-mode.txt` file holding `harden` in the context
-pack sets the mode for one ticket. Harden mode always ends escalated: D7, D8 and D9 need a coverage
-matrix, an effect closure and a focus map, which it does not build, and the ledger waives single items,
-never an empty matrix. The end summary lists the other predicates that fail.
-
-The test plan gate stores a JSON payload with the question (`payload_json` column of `questions`) for the
-dashboard: units, test level, radius, depth, size, mode and warnings. If the mapper ends with no accepted
-handoff, the step ends escalated and posts no gate.
+`--test-mode write` (the default) may create test files for production code that no test covers.
+`--test-mode harden` only extends the existing usecase-level test files that import the changed production
+files, never creates a test file and restores any test that existed before the run. A `test-mode.txt` file
+holding `harden` in the context pack sets the mode for one ticket.
 
 **Stages and steps.** Every ticket phase belongs to one of four stages: plan (intake, grill, plan),
 implementation (build, static), testing (every `test:*` step), verification (verify, record, review).

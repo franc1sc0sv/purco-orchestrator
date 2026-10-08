@@ -7,7 +7,12 @@
     "start": "node src/server.ts"
   },
   "dependencies": {
+    "@babel/parser": "8.0.7",
     "@modelcontextprotocol/sdk": "^1.20.0",
+    "@stryker-mutator/api": "10.0.0",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/instrumenter": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "test-forge-contracts": "*",
     "zod": "^4.5.4"
   }

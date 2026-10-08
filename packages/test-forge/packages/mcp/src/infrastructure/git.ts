@@ -111,3 +111,39 @@ export const commitsIntroducing = async ({
     .map(parseCommit)
     .filter((commit): commit is Commit => commit !== null);
 };
+
+export const mergeBaseWith = async (
+  cwd: string,
+  ref: string,
+): Promise<string | null> => (await output(cwd, ["merge-base", "HEAD", ref])) || null;
+
+export const diffAgainstCommit = async (
+  cwd: string,
+  commit: string,
+): Promise<string> => {
+  const result = await git(cwd, [
+    "diff",
+    "-U0",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-renames",
+    commit,
+  ]);
+  return result.ok ? result.stdout : "";
+};
+
+export const listedFiles = async (
+  cwd: string,
+  patterns: readonly string[],
+): Promise<string[]> => {
+  const result = await git(cwd, [
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    "--",
+    ...patterns,
+  ]);
+  if (!result.ok) return [];
+  return result.stdout.split("\n").filter((line) => line.trim() !== "");
+};

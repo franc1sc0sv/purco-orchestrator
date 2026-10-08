@@ -24,7 +24,7 @@ const resolveSpecifier = (testFile: string, specifier: string): string => {
   return stripExtension(specifier);
 };
 
-const digest = (content: string): string => createHash("sha1").update(content).digest("hex");
+export const digest = (content: string): string => createHash("sha1").update(content).digest("hex");
 
 export const importedSources = (
   testFile: string,
@@ -37,19 +37,29 @@ export const importedSources = (
   return sources.filter((source) => imported.has(stripExtension(source)));
 };
 
+const HUB_IMPORTER_LIMIT = 10;
+
 export const existingUnits = (input: {
   sources: readonly string[];
   testFiles: readonly string[];
   scope: ForgeScope;
   read: (file: string) => string;
-}): Unit[] =>
-  input.testFiles
+}): Unit[] => {
+  const imports = input.testFiles
     .filter((file) => TEST_FILE.test(file) && isTestPath(file) && isUsecaseTest(file, input.scope))
-    .flatMap((file) => {
-      const covered = importedSources(file, input.read(file), input.sources);
-      return covered.length === 0 ? [] : [{ file, sources: covered, rows: [], focusLines: [] }];
+    .map((file) => ({ file, covered: importedSources(file, input.read(file), input.sources) }));
+  const importers = new Map<string, number>();
+  for (const { covered } of imports) {
+    for (const source of covered) importers.set(source, (importers.get(source) ?? 0) + 1);
+  }
+  const isHub = (source: string): boolean => (importers.get(source) ?? 0) > HUB_IMPORTER_LIMIT;
+  return imports
+    .flatMap(({ file, covered }) => {
+      const own = covered.filter((source) => !isHub(source));
+      return own.length === 0 ? [] : [{ file, sources: own, rows: [], focusLines: [] }];
     })
     .sort((left, right) => left.file.localeCompare(right.file));
+};
 
 export const testNames = (content: string): string[] => [
   ...new Set([...content.matchAll(TEST_CALL)].map((match) => match[2] ?? "")),

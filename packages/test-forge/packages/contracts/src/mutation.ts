@@ -21,6 +21,10 @@ export const MUTANT_OUTCOMES = [
   "error",
   "timeout",
   "unviable",
+  "no_coverage",
+  "timeout_pending",
+  "out_of_scope",
+  "killed_by_timeout",
 ] as const;
 
 export type MutantOutcome = (typeof MUTANT_OUTCOMES)[number];

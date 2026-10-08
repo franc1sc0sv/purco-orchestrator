@@ -20,6 +20,11 @@ export const MutantPanel = ({ cell, closeHref }: { cell: Cell; closeHref: string
         <Badge variant="secondary" className="font-mono">
           line {detail.line}
         </Badge>
+        {detail.mutator ? (
+          <Badge variant="outline" className="font-mono">
+            {detail.mutator}
+          </Badge>
+        ) : null}
         {result ? (
           <Badge variant="outline" className="font-mono">
             {formatDuration(result.ms)}

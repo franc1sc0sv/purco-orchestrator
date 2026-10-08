@@ -376,7 +376,7 @@ export const gatherEvidence = async ({
     `SELECT m.id, m.file_path, m.line, m.operator
      FROM mutants m
      WHERE m.project_key = ? AND m.run_id = ?
-       AND m.outcome IN ('survived', 'equivalent-claimed', 'refuted')
+       AND m.outcome IN ('survived', 'no_coverage', 'equivalent-claimed', 'refuted')
        AND NOT EXISTS (
          SELECT 1 FROM equivalence_claims e
          WHERE e.mutant_id = m.id AND e.upheld = 1 AND e.signed_by IS NOT NULL
@@ -393,7 +393,7 @@ export const gatherEvidence = async ({
   const unrun = all<MutantRow>(
     db,
     `SELECT id, file_path, line, operator FROM mutants
-     WHERE project_key = ? AND run_id = ? AND outcome IN ('pending', 'error', 'timeout')
+     WHERE project_key = ? AND run_id = ? AND outcome IN ('pending', 'error', 'timeout', 'timeout_pending')
      ORDER BY file_path, line`,
     [projectKey, runId]
   ).map((row) => ({

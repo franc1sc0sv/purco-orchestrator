@@ -1071,6 +1071,8 @@ export class Orchestrator {
         spawn: (job) => this.forgeWorker(job),
         ask: (kind, text, payload) => this.humanRaw(kind, text, undefined, payload),
         decide: (question) => this.leadAnswer(question, ""),
+        event: (kind, text, data) =>
+          this.scratchpad.record(ORCHESTRATOR_LABEL, step.phase, kind, text, data),
         log: (line) => {
           fs.appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`);
           this.record(`forge: ${line.slice(0, 300)}`);

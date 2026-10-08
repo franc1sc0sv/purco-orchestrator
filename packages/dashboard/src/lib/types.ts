@@ -206,12 +206,29 @@ export type MutantEvent = {
   line: number;
   before: string;
   after: string;
-  status: "killed" | "survived" | "equivalent" | "error";
+  mutator?: string;
+  status:
+    | "killed"
+    | "survived"
+    | "equivalent"
+    | "error"
+    | "no_coverage"
+    | "timeout_pending"
+    | "killed_by_timeout"
+    | "out_of_scope"
+    | "unviable";
   ms: number;
   tests?: string[];
 };
 
-export type PlannedMutant = { id: number; file: string; line: number; before: string; after: string };
+export type PlannedMutant = {
+  id: number;
+  file: string;
+  line: number;
+  before: string;
+  after: string;
+  mutator?: string;
+};
 
 export type GateMark = { id: string; pass: boolean };
 

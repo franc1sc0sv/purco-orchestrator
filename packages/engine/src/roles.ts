@@ -203,21 +203,8 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
     model: MODELS.sonnet,
     phase: "test",
     description:
-      "Maps the changed production code: the unit contract, the coverage matrix, the effect closure and one test file per unit. Writes no test.",
-    tools: [
-      ...AUDIT_TOOLS,
-      "Write",
-      ...forgeTools(
-        "ast_file_facts",
-        "codex_rules_for",
-        "codex_rule_get",
-        "ledger_matrix_upsert",
-        "closure_compute",
-        "closure_unresolved",
-        "closure_resolve_batch",
-        "gates_status",
-      ),
-    ],
+      "Names the test file of each production file that has none, following the repository's test layout. Writes no test.",
+    tools: [...AUDIT_TOOLS, "Write", ...forgeTools("ast_file_facts")],
     writes: true,
     needsForge: true,
     effort: "medium",
@@ -228,17 +215,8 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
     model: MODELS.sonnet,
     phase: "test",
     description:
-      "Owns one test file. Writes the tests for its matrix rows and focus lines, runs only that file, and marks the cells it covers. Never edits production code.",
-    tools: [
-      ...WRITE_TOOLS,
-      ...forgeTools(
-        "codex_rule_get",
-        "codex_fixture_list",
-        "ast_file_facts",
-        "ledger_matrix_upsert",
-        "ledger_verdict_record_batch",
-      ),
-    ],
+      "Owns one test file. Writes tests that kill the surviving mutants it is given, runs only that file, and lists the mutants each new test kills. Never edits production code.",
+    tools: [...WRITE_TOOLS, ...forgeTools("codex_rule_get", "codex_fixture_list", "ast_file_facts")],
     writes: true,
     needsForge: true,
     testFilesOnly: true,

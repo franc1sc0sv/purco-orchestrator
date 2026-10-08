@@ -1,12 +1,22 @@
 import fs from "node:fs";
 
-export type MutantStatus = "killed" | "survived" | "equivalent" | "error";
+export type MutantStatus =
+  | "killed"
+  | "survived"
+  | "equivalent"
+  | "error"
+  | "no_coverage"
+  | "timeout_pending"
+  | "killed_by_timeout"
+  | "out_of_scope"
+  | "unviable";
 
 export type MutantDetail = {
   file: string;
   line: number;
   before: string;
   after: string;
+  mutator?: string;
 };
 
 export type MutantEvent = MutantDetail & {
@@ -68,11 +78,52 @@ const detailOf = (row: Record<string, unknown>): MutantDetail => ({
   after: typeof row.after === "string" ? row.after : "",
 });
 
-const statusOf = (outcome: unknown): MutantStatus => {
-  if (outcome === "killed") return "killed";
-  if (outcome === "survived") return "survived";
-  return "error";
+const STATUS_BY_OUTCOME: Readonly<Record<string, MutantStatus>> = {
+  killed: "killed",
+  survived: "survived",
+  "equivalent-signed": "equivalent",
+  "equivalent-claimed": "survived",
+  refuted: "survived",
+  no_coverage: "no_coverage",
+  timeout_pending: "timeout_pending",
+  killed_by_timeout: "killed_by_timeout",
+  out_of_scope: "out_of_scope",
+  unviable: "unviable",
 };
+
+export const statusOfOutcome = (outcome: unknown): MutantStatus =>
+  (typeof outcome === "string" ? STATUS_BY_OUTCOME[outcome] : undefined) ?? "error";
+
+const statusOf = statusOfOutcome;
+
+export type LedgerMutantView = {
+  id: number;
+  file: string;
+  line: number;
+  mutator: string;
+  original: string;
+  replacement: string;
+  outcome: string;
+  killedBy: readonly { file: string; name: string }[];
+};
+
+export const plannedOfLedger = (row: LedgerMutantView): PlannedMutant => ({
+  id: row.id,
+  file: row.file,
+  line: row.line,
+  before: row.original,
+  after: row.replacement,
+  mutator: row.mutator,
+});
+
+export const eventOfLedger = (row: LedgerMutantView, ms: number): MutantEvent => ({
+  ...plannedOfLedger(row),
+  status: statusOfOutcome(row.outcome),
+  ms,
+  ...(row.killedBy.length > 0
+    ? { tests: row.killedBy.map((kill) => `${kill.file}::${kill.name}`) }
+    : {}),
+});
 
 const testsOf = (killedBy: unknown): string[] | undefined => {
   if (!Array.isArray(killedBy) || killedBy.length === 0) return undefined;

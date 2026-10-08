@@ -54,6 +54,14 @@ export const TOOL_NAMES = [
   "runner_flake_probe",
   "runner_gate_static",
   "runner_run_suite",
+  "stryker_extra_operators",
+  "stryker_harness_start",
+  "stryker_harness_status",
+  "stryker_harness_stop",
+  "stryker_mutation_pass",
+  "stryker_run",
+  "stryker_scope",
+  "stryker_timeout_recheck",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];

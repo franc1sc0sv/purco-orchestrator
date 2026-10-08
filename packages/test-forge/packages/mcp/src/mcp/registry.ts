@@ -8,6 +8,7 @@ import { registerExecutionTools } from "./tools/execution.tools.ts";
 import { registerGatesTools } from "./tools/gates.tools.ts";
 import { registerLedgerTools } from "./tools/ledger.tools.ts";
 import { registerMutationTools } from "./tools/mutation.tools.ts";
+import { registerStrykerTools } from "./tools/stryker.tools.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { TOOL_NAMES } from "test-forge-contracts/tool-names";
 
@@ -23,6 +24,7 @@ const REGISTRARS: readonly RegisterTools[] = [
   registerGatesTools,
   registerLedgerTools,
   registerMutationTools,
+  registerStrykerTools,
 ];
 
 type RegisterTool = McpServer["registerTool"];

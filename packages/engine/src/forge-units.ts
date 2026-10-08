@@ -162,7 +162,7 @@ export const readUnits = (file: string): Unit[] | string => {
   return units;
 };
 
-const sameFile = (left: string, right: string): boolean =>
+export const sameFile = (left: string, right: string): boolean =>
   left === right || left.endsWith(`/${right}`) || right.endsWith(`/${left}`);
 
 export const unitForFile = (units: readonly Unit[], file: string): Unit | undefined =>

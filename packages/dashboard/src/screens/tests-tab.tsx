@@ -18,11 +18,20 @@ const CELL_STYLE: Record<CellState, string> = {
   running: "bg-blue-3 border-primary border-2 animate-soft-pulse",
   pending: "bg-muted border-transparent",
   error: "bg-card border-dashed border-muted-foreground",
+  no_coverage: "bg-card border-dashed border-primary border-2",
+  timeout_pending: "bg-blue-3 border-primary",
+  killed_by_timeout: "bg-primary/70 border-primary",
+  out_of_scope: "bg-muted border-transparent opacity-40",
+  unviable: "bg-muted border-muted-foreground",
 };
 
 const LEGEND: { state: CellState; label: string }[] = [
   { state: "killed", label: "killed" },
+  { state: "killed_by_timeout", label: "killed by timeout" },
   { state: "survived", label: "survived" },
+  { state: "no_coverage", label: "no coverage" },
+  { state: "timeout_pending", label: "timeout, rechecking" },
+  { state: "unviable", label: "compile error" },
   { state: "equivalent", label: "equivalent" },
   { state: "running", label: "running now" },
   { state: "pending", label: "pending" },

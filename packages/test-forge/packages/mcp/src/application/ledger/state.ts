@@ -188,8 +188,10 @@ export const state = async ({ cwd, runId }: StateInput) => {
     .filter(
       (row) =>
         (row.outcome === "survived" ||
+          row.outcome === "no_coverage" ||
           row.outcome === "error" ||
           row.outcome === "timeout" ||
+          row.outcome === "timeout_pending" ||
           (row.outcome === "equivalent-claimed" && row.signed_claims === 0)) &&
         !waived.has(`mutant::${row.id}`)
     )
@@ -325,7 +327,7 @@ export const state = async ({ cwd, runId }: StateInput) => {
     mutation: {
       surviving: survivingMutants,
       pending: mutantRows.filter((row) => row.outcome === "pending").length,
-      total: mutantRows.length,
+      total: mutantRows.filter((row) => row.outcome !== "out_of_scope").length,
     },
     openBlocks,
   };
