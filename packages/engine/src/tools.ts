@@ -9,6 +9,7 @@ import { parseHandoff } from "./handoff.ts";
 import {
   OUTCOME_KINDS,
   ROLES,
+  TICKET_KINDS,
   type Phase,
   type RoleName,
   type StepResult,
@@ -265,6 +266,19 @@ export const buildOrchestratorServer = (ctx: ToolContext) =>
             .array(z.unknown())
             .optional()
             .describe("optional list of {title, severity, location} for each defect or risk you found"),
+          kind: z
+            .enum(TICKET_KINDS)
+            .optional()
+            .describe("intake only: the kind of ticket"),
+          story: z
+            .object({})
+            .catchall(z.unknown())
+            .optional()
+            .describe("builder and reviewer only: {line, example?: {input, result}, labels?: {\"FromFile>ToFile\": \"verb\"}, before?, after?, metrics?: [{name, before, after, unit}]}"),
+          applied_notes: z
+            .array(z.object({ id: z.string(), reply: z.string() }))
+            .optional()
+            .describe("the notes from the user that you applied: {id: \"N-12\", reply: one line on what you did}"),
         },
         async (args) => {
           const agent = ctx.activeAgent();

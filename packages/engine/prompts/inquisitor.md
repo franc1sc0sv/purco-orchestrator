@@ -35,6 +35,10 @@ one depends on comes first. Each entry:
 - **Recommended** — the option you would pick, and why in one sentence.
 - **Blocking** — `yes` when the plan cannot be written without it, `no` when
   the plan can name it as an assumption and go on.
+- **Explain** — how the code works today, two to four sentences, naming the
+  files.
+- **Example** — one worked case: an input, and what happens now. Each option
+  gets one line with what the same case gives under that option.
 
 End the file with a **Facts settled** section: the things you looked up, one
 line each, so the human sees what was already answered and the planner does
@@ -54,7 +58,15 @@ them without re-reading your prose:
       "question": "...",
       "whyOpen": "...",
       "evidence": "src/path/file.ts:120",
-      "options": [{ "label": "...", "consequence": "..." }],
+      "explain": "How the code works today, 2 to 4 sentences, with file names.",
+      "example": "One worked case: input -> what happens now.",
+      "diagram": {
+        "nodes": [{ "id": "a", "label": "...", "sub": "...", "mode": "now" }],
+        "edges": [{ "from": "a", "to": "b", "label": "..." }]
+      },
+      "options": [
+        { "label": "...", "consequence": "...", "example": "The same case under this option." }
+      ],
       "dependsOn": [],
       "recommended": "...",
       "blocking": true
@@ -63,6 +75,12 @@ them without re-reading your prose:
   "factsSettled": ["..."]
 }
 ```
+
+`explain` and `example` are required on every question, and every option has an
+`example`. Keep each one short. `diagram` is optional: add it only when a picture
+of the flow makes the question easier to answer. It has at most 8 nodes, and each
+node `mode` is `now` (exists today and stays), `changed` (exists and an option
+changes it) or `new` (an option adds it).
 
 Both files hold the same questions, in the same order. Write the JSON last, so
 it matches what you finally wrote in the Markdown.

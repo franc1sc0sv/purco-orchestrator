@@ -158,6 +158,8 @@ export type EventKind =
   | "message"
   | "handoff"
   | "permission_denied"
+  | "mutant"
+  | "mutant_plan"
   | "cost";
 
 export type ScratchpadEvent = {
@@ -319,6 +321,30 @@ export type ResultFinding = {
   location: string;
 };
 
+export const TICKET_KINDS = ["feature", "bugfix", "performance", "ui", "data", "chore"] as const;
+export type TicketKind = (typeof TICKET_KINDS)[number];
+
+export type Story = {
+  line: string;
+  example?: { input: string; result: string };
+  labels?: Record<string, string>;
+  before?: string;
+  after?: string;
+  metrics?: { name: string; before: number; after: number; unit?: string }[];
+};
+
+export type ChangedFile = { path: string; added: number; deleted: number; isNew: boolean };
+
+export type ChangedTable = {
+  name: string;
+  isNew: boolean;
+  columns: string[];
+  references: string[];
+  migration: string;
+};
+
+export type ChangeSnapshot = { files: ChangedFile[]; tables: ChangedTable[] };
+
 export type StepResult = {
   status: OutcomeKind;
   summary: string;
@@ -328,6 +354,39 @@ export type StepResult = {
   evidence?: string;
   counts?: Record<string, number>;
   findings?: ResultFinding[];
+  kind?: TicketKind;
+  story?: Story;
+  appliedNotes?: AppliedNote[];
+};
+
+export type AppliedNote = { id: number; reply: string };
+
+export const NOTE_STATUSES = ["queued", "seen", "applied"] as const;
+export type NoteStatus = (typeof NOTE_STATUSES)[number];
+
+export type NoteVia = "dashboard" | "cli";
+
+export type StoredNote = {
+  id: number;
+  ticket: string;
+  targetAgent?: string;
+  file?: string;
+  line?: number;
+  text: string;
+  status: NoteStatus;
+  reply?: string;
+  createdAt: string;
+  seenAt?: string;
+  appliedAt?: string;
+  via: NoteVia;
+};
+
+export type NewNote = {
+  targetAgent?: string;
+  file?: string;
+  line?: number;
+  text: string;
+  via: NoteVia;
 };
 
 export type HumanItemKind = "question" | "gate" | "sign";

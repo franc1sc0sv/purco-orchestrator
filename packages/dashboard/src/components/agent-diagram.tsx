@@ -3,15 +3,18 @@ import {
   Handle,
   Position,
   ReactFlow,
+  useReactFlow,
+  useStore,
   type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Counter } from "@/components/counter";
 import { ToneBadge } from "@/components/state-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { eventsOfWorker, nowDoing, shortTarget, toolLabel } from "@/lib/agent-activity";
 import { STEP_TONE, TONES, WORKER_LABEL, WORKER_TONE, isWorkerBusy, type Tone } from "@/lib/colors";
 import { formatCost, formatTokens, shortModel } from "@/lib/format";
 import {
@@ -19,21 +22,26 @@ import {
   STAGE_LABELS,
   type PipelineStage,
   type Stage,
+  type StreamEvent,
   type Worker,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type LeadData = { tone: Tone; busy: boolean };
 type StageData = { label: string; tone: Tone; busy: boolean };
-type WorkerData = { worker: Worker; busy: boolean; ended: boolean };
+type WorkerData = { worker: Worker; busy: boolean; ended: boolean; chip: string | undefined; selected: boolean };
 
 type LeadNode = Node<LeadData, "lead">;
 type StageNode = Node<StageData, "stage">;
 type WorkerNode = Node<WorkerData, "worker">;
 
-const ROW_HEIGHT = 130;
+const ROW_HEIGHT = 136;
 const STAGE_X = 220;
 const WORKER_X = 520;
+const WORKER_COLUMN_WIDTH = 240;
+const WORKER_COLUMNS = 2;
+
+const rowsOf = (count: number): number => Math.max(1, Math.ceil(count / WORKER_COLUMNS));
 const MAX_ENDED_PER_STAGE = 5;
 
 const hidden = { opacity: 0, pointerEvents: "none" } as const;
@@ -85,34 +93,53 @@ const WorkerView = ({ data }: NodeProps<WorkerNode>) => {
   const tone = WORKER_TONE[worker.state];
   const tokens = worker.tokensIn + worker.tokensOut + worker.cacheWrite;
   return (
-    <Card
-      className={cn(
-        "w-52 gap-1 border-2 p-2.5 text-xs transition-opacity duration-1000",
-        TONES[tone].vars,
-        TONES[tone].node,
-        data.busy && "animate-node-glow",
-        data.ended && "opacity-40",
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate font-semibold">{worker.role}</span>
-        <Badge variant="secondary" className="font-mono">
-          {shortModel(worker.model)}
-        </Badge>
-      </div>
-      <ToneBadge tone={tone} pulse={data.busy} className="normal-case tracking-normal">
-        {WORKER_LABEL[worker.state]}
-      </ToneBadge>
-      <div className="text-muted-foreground truncate font-mono" title={worker.action}>
-        {worker.action || "-"}
-      </div>
-      <div className="flex justify-between font-mono">
-        <Counter value={tokens} format={formatTokens} />
-        <Counter value={worker.costUsd} format={formatCost} />
-      </div>
-      <Anchors />
-    </Card>
+    <div className="relative">
+      <Card
+        className={cn(
+          "w-52 cursor-pointer gap-1 border-2 p-2.5 text-xs transition-opacity duration-1000",
+          TONES[tone].vars,
+          TONES[tone].node,
+          data.busy && "animate-node-glow",
+          data.ended && "opacity-40",
+          data.selected && "ring-primary ring-2 ring-offset-2 ring-offset-background",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate font-semibold">{worker.role}</span>
+          <Badge variant="secondary" className="font-mono">
+            {shortModel(worker.model)}
+          </Badge>
+        </div>
+        <ToneBadge tone={tone} pulse={data.busy} className="normal-case tracking-normal">
+          {WORKER_LABEL[worker.state]}
+        </ToneBadge>
+        <div className="text-muted-foreground truncate font-mono" title={worker.action}>
+          {worker.action || "-"}
+        </div>
+        <div className="flex justify-between font-mono">
+          <Counter value={tokens} format={formatTokens} />
+          <Counter value={worker.costUsd} format={formatCost} />
+        </div>
+        <Anchors />
+      </Card>
+      {data.chip ? (
+        <div className="bg-blue-1 text-primary mt-1.5 w-52 truncate rounded-md px-2 py-1 font-mono text-[11px]">
+          {data.chip}
+        </div>
+      ) : null}
+    </div>
   );
+};
+
+const FIT_PADDING = 0.04;
+
+const Refit = () => {
+  const { fitView } = useReactFlow();
+  const size = useStore((state) => `${state.width}x${state.height}`);
+  useEffect(() => {
+    void fitView({ padding: FIT_PADDING });
+  }, [fitView, size]);
+  return null;
 };
 
 const nodeTypes = { lead: LeadView, stage: StageView, worker: WorkerView };
@@ -151,6 +178,7 @@ const buildGraph = (
   pipeline: PipelineStage[],
   alive: boolean,
   stuck: boolean,
+  view: { chips: Map<string, string>; selectedId: string | undefined },
 ): { nodes: Node[]; edges: Edge[]; height: number } => {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -163,7 +191,7 @@ const buildGraph = (
     stage,
     own: shown.filter((worker) => stageOf(worker) === stage.stage),
   }));
-  const totalHeight = groups.reduce((sum, group) => sum + Math.max(1, group.own.length) * ROW_HEIGHT, 0);
+  const totalHeight = groups.reduce((sum, group) => sum + rowsOf(group.own.length) * ROW_HEIGHT, 0);
 
   nodes.push({
     id: "lead",
@@ -178,7 +206,7 @@ const buildGraph = (
 
   let cursor = 0;
   for (const { stage, own } of groups) {
-    const groupHeight = Math.max(1, own.length) * ROW_HEIGHT;
+    const groupHeight = rowsOf(own.length) * ROW_HEIGHT;
     const busy = own.some((worker) => liveIds.has(worker.id) && isWorkerBusy(worker.state));
     nodes.push({
       id: `stage:${stage.stage}`,
@@ -208,13 +236,22 @@ const buildGraph = (
       nodes.push({
         id: `worker:${worker.id}`,
         type: "worker",
-        position: { x: WORKER_X, y: cursor + index * ROW_HEIGHT + 6 },
-        data: { worker, busy: live && isWorkerBusy(worker.state), ended: !live },
+        position: {
+          x: WORKER_X + (index % WORKER_COLUMNS) * WORKER_COLUMN_WIDTH,
+          y: cursor + Math.floor(index / WORKER_COLUMNS) * ROW_HEIGHT + 6,
+        },
+        data: {
+          worker,
+          busy: live && isWorkerBusy(worker.state),
+          ended: !live,
+          chip: view.chips.get(worker.id),
+          selected: view.selectedId === worker.id,
+        },
         draggable: false,
       } satisfies WorkerNode);
       edges.push({
         id: `${stage.stage}->${worker.id}`,
-        source: `stage:${stage.stage}`,
+        source: index % WORKER_COLUMNS === 0 ? `stage:${stage.stage}` : `worker:${own[index - 1]?.id}`,
         target: `worker:${worker.id}`,
         ...workerEdge(worker, live, stuck),
       });
@@ -230,16 +267,32 @@ export const AgentDiagram = ({
   pipeline,
   alive,
   stuck,
+  events,
+  selectedId,
+  onSelect,
 }: {
   workers: Worker[];
   liveWorkerIds: string[];
   pipeline: PipelineStage[];
   alive: boolean;
   stuck: boolean;
+  events: StreamEvent[];
+  selectedId: string | undefined;
+  onSelect: (workerId: string) => void;
 }) => {
+  const chips = useMemo(() => {
+    const live = new Set(liveWorkerIds);
+    const entries = workers
+      .filter((worker) => live.has(worker.id))
+      .flatMap((worker): [string, string][] => {
+        const doing = nowDoing(eventsOfWorker(events, worker));
+        return doing ? [[worker.id, `${toolLabel(doing.tool)} · ${shortTarget(doing.cmd)}`.replace(/ · $/, "")]] : [];
+      });
+    return new Map(entries);
+  }, [workers, liveWorkerIds, events]);
   const graph = useMemo(
-    () => buildGraph(workers, new Set(liveWorkerIds), pipeline, alive, stuck),
-    [workers, liveWorkerIds, pipeline, alive, stuck],
+    () => buildGraph(workers, new Set(liveWorkerIds), pipeline, alive, stuck, { chips, selectedId }),
+    [workers, liveWorkerIds, pipeline, alive, stuck, chips, selectedId],
   );
   const structure = graph.nodes.map((node) => node.id).join("|");
   return (
@@ -249,14 +302,18 @@ export const AgentDiagram = ({
         nodes={graph.nodes}
         edges={graph.edges}
         nodeTypes={nodeTypes}
+        onNodeClick={(_, node) => {
+          if (node.type === "worker") onSelect(node.id.replace(/^worker:/, ""));
+        }}
         fitView
-        fitViewOptions={{ padding: 0.08 }}
+        fitViewOptions={{ padding: FIT_PADDING }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
         zoomOnScroll={false}
         proOptions={{ hideAttribution: true }}
       >
+        <Refit />
         <Background gap={28} size={1} color="var(--border)" />
       </ReactFlow>
     </div>

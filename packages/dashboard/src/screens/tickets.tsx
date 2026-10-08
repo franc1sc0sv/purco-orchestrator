@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { AnswerNeeded } from "@/components/answer-needed";
 import { Counter } from "@/components/counter";
 import { TicketRowsSkeleton } from "@/components/screen-skeleton";
 import { RowStageBars } from "@/components/stage-bars";
@@ -6,6 +7,7 @@ import { SizeChip, StateText } from "@/components/state-badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ticketHref } from "@/hooks/use-route";
 import { formatCost, formatTokens } from "@/lib/format";
 import {
   countByFilter,
@@ -35,30 +37,33 @@ const rank = (summary: TicketSummary): number => {
 };
 
 const TicketRow = ({ summary }: { summary: TicketSummary }) => (
-  <div className={`${COLUMNS} hover:bg-accent/40 focus-within:bg-accent/40 relative px-3 py-3 transition-colors`}>
-    <a
-      href={`#/ticket/${encodeURIComponent(summary.ticket)}`}
-      className="font-mono text-base font-semibold outline-none after:absolute after:inset-0 after:content-['']"
-    >
-      {summary.ticket}
-    </a>
-    <div>
-      <SizeChip size={summary.size} />
+  <div className="hover:bg-accent/40 focus-within:bg-accent/40 relative transition-colors">
+    <div className={`${COLUMNS} px-3 py-3`}>
+      <a
+        href={ticketHref(summary.ticket, summary.state === "failed" ? "failures" : "live")}
+        className="font-mono text-base font-semibold outline-none after:absolute after:inset-0 after:content-['']"
+      >
+        {summary.ticket}
+      </a>
+      <div>
+        <SizeChip size={summary.size} />
+      </div>
+      <StateText state={summary.state} />
+      <div className="relative py-3">
+        <RowStageBars stages={summary.stages} />
+      </div>
+      <Counter value={summary.costUsd} format={formatCost} className="text-right font-mono text-sm" />
+      <Counter value={summary.tokens} format={formatTokens} className="text-right font-mono text-sm" />
+      <span className="text-right font-mono text-sm">{summary.liveAgents}</span>
+      <div className="flex justify-end">
+        {summary.openItemCount > 0 && summary.awaitingGrill === null ? (
+          <Button asChild size="sm" className="relative z-10">
+            <a href={ticketHref(summary.ticket, "live", { review: 1 })}>Review</a>
+          </Button>
+        ) : null}
+      </div>
     </div>
-    <StateText state={summary.state} />
-    <div className="relative py-3">
-      <RowStageBars stages={summary.stages} />
-    </div>
-    <Counter value={summary.costUsd} format={formatCost} className="text-right font-mono text-sm" />
-    <Counter value={summary.tokens} format={formatTokens} className="text-right font-mono text-sm" />
-    <span className="text-right font-mono text-sm">{summary.liveAgents}</span>
-    <div className="flex justify-end">
-      {summary.openItemCount > 0 ? (
-        <Button asChild size="sm" className="relative z-10">
-          <a href={`#/ticket/${encodeURIComponent(summary.ticket)}/review`}>Review</a>
-        </Button>
-      ) : null}
-    </div>
+    {summary.awaitingGrill ? <AnswerNeeded ticket={summary.ticket} grill={summary.awaitingGrill} /> : null}
   </div>
 );
 

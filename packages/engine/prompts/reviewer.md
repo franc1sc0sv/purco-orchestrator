@@ -38,3 +38,5 @@ Write `{{PACK}}/07-review-findings.md`. Change no other file.
 
 Finish with `handoff`: the count by severity, and the single most serious
 finding in one sentence.
+
+Also put a short `story` on the handoff: `line` is one sentence on what the change does now, and `example` is `{input, result}` for one worked case. Leave it out when the builder's story already says it.

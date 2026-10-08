@@ -5,17 +5,31 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   GAF,
+  answerEarly,
   answerItem,
   historyList,
   itemExists,
   isKnownTicket,
   markSeen,
+  addTicketNote,
+  ticketEventsUntil,
+  ticketFailures,
+  ticketToolTicks,
+  ticketFileDiff,
+  ticketFiles,
+  ticketNotes,
+  ticketStory,
+  ticketRawLog,
+  ticketDelta,
   ticketDetail,
   ticketList,
+  ticketSnapshot,
+  type StreamState,
 } from "./dashboard-data.ts";
 import { collectMailbox, collectRuns } from "./monitor.ts";
 import { TOKEN_HEADER, checkRequest, createToken, injectToken, type GuardVerdict } from "./monitor-guard.ts";
 import { MONITOR_PAGE } from "./monitor-page.ts";
+import type { NewNote } from "./types.ts";
 import { UsageMonitor } from "./usage.ts";
 
 const DASHBOARD_DIST = path.join(
@@ -30,8 +44,11 @@ const usageMonitor = new UsageMonitor();
 
 const USAGE_REFRESH_MS = 10000;
 const STREAM_INTERVAL_MS = 2000;
+const DELTA_INTERVAL_MS = 250;
+const FULL_SNAPSHOT_INTERVAL_MS = 30000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_NOTE_CHARS = 2000;
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -105,11 +122,70 @@ const parseSeenIds = (body: string): number[] | undefined => {
   }
 };
 
-const snapshotFor = (ticket: string | null): unknown =>
-  ticket === null ? { tickets: ticketList(), usage: usageMonitor.snapshot() } : (ticketDetail(ticket) ?? null);
+const parseNewNote = (body: string): NewNote | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const { text, file, line, target_agent: target } = parsed as Record<string, unknown>;
+    if (typeof text !== "string" || text.trim().length === 0) return undefined;
+    if (file !== undefined && (typeof file !== "string" || file.length === 0)) return undefined;
+    if (line !== undefined && (!Number.isInteger(line) || (line as number) < 1)) return undefined;
+    if (target !== undefined && (typeof target !== "string" || target.length === 0)) return undefined;
+    return {
+      text: text.trim().slice(0, MAX_NOTE_CHARS),
+      via: "dashboard",
+      ...(file !== undefined ? { file: file as string } : {}),
+      ...(line !== undefined ? { line: line as number } : {}),
+      ...(target !== undefined ? { targetAgent: target as string } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+const listSnapshot = (): unknown => ({ tickets: ticketList(), usage: usageMonitor.snapshot() });
 
 const withoutClock = (key: string, value: unknown): unknown =>
   key === "generatedAt" ? undefined : value;
+
+const sendEvent = (response: http.ServerResponse, event: string, data: unknown): void => {
+  response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+};
+
+const streamList = (response: http.ServerResponse): NodeJS.Timeout => {
+  let lastHash = "";
+  const push = (): void => {
+    const snapshot = listSnapshot();
+    const hash = crypto
+      .createHash("sha1")
+      .update(JSON.stringify(snapshot, withoutClock))
+      .digest("hex");
+    if (hash === lastHash) return;
+    lastHash = hash;
+    sendEvent(response, "snapshot", snapshot);
+  };
+  push();
+  return setInterval(push, STREAM_INTERVAL_MS);
+};
+
+const streamTicket = (response: http.ServerResponse, ticket: string): NodeJS.Timeout[] => {
+  let state: StreamState | undefined;
+  const sendSnapshot = (): void => {
+    const snapshot = ticketSnapshot(ticket);
+    if (!snapshot) return;
+    state = snapshot.state;
+    sendEvent(response, "snapshot", snapshot.detail);
+  };
+  const sendDelta = (): void => {
+    if (!state) return sendSnapshot();
+    const next = ticketDelta(ticket, state);
+    if (!next) return;
+    state = next.state;
+    sendEvent(response, "delta", next.delta);
+  };
+  sendSnapshot();
+  return [setInterval(sendDelta, DELTA_INTERVAL_MS), setInterval(sendSnapshot, FULL_SNAPSHOT_INTERVAL_MS)];
+};
 
 const openStream = (
   request: http.IncomingMessage,
@@ -121,23 +197,10 @@ const openStream = (
     "cache-control": "no-store",
     connection: "keep-alive",
   });
-  let lastHash = "";
-  const push = (): void => {
-    const snapshot = snapshotFor(ticket);
-    const hash = crypto
-      .createHash("sha1")
-      .update(JSON.stringify(snapshot, withoutClock))
-      .digest("hex");
-    if (hash === lastHash) return;
-    lastHash = hash;
-    response.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
-  };
-  push();
-  const data = setInterval(push, STREAM_INTERVAL_MS);
+  const timers = ticket === null ? [streamList(response)] : streamTicket(response, ticket);
   const beat = setInterval(() => response.write(": heartbeat\n\n"), HEARTBEAT_INTERVAL_MS);
   request.on("close", () => {
-    clearInterval(data);
-    clearInterval(beat);
+    for (const timer of [...timers, beat]) clearInterval(timer);
   });
 };
 
@@ -237,6 +300,40 @@ const route = async (
       const since = url.searchParams.get("since") ?? undefined;
       return sendJson(response, 200, ticketDetail(ticket, since) ?? null);
     }
+    if (segments.length === 4 && segments[3] === "failures" && method === "GET") {
+      return sendJson(response, 200, ticketFailures(ticket) ?? null);
+    }
+    if (segments.length === 4 && segments[3] === "ticks" && method === "GET") {
+      return sendJson(response, 200, ticketToolTicks(ticket));
+    }
+    if (segments.length === 4 && segments[3] === "events" && method === "GET") {
+      const until = url.searchParams.get("until") ?? "";
+      if (Number.isNaN(Date.parse(until))) return sendJson(response, 400, { error: "until must be an ISO time" });
+      return sendJson(response, 200, ticketEventsUntil(ticket, new Date(until).toISOString()));
+    }
+    if (segments.length === 4 && segments[3] === "story" && method === "GET") {
+      return sendJson(response, 200, ticketStory(ticket) ?? null);
+    }
+    if (segments.length === 4 && segments[3] === "files" && method === "GET") {
+      return sendJson(response, 200, ticketFiles(ticket) ?? { files: [] });
+    }
+    if (segments.length === 4 && segments[3] === "diff" && method === "GET") {
+      const diff = ticketFileDiff(ticket, url.searchParams.get("path") ?? "");
+      return diff ? sendJson(response, 200, diff) : sendNotFound(response);
+    }
+    if (segments.length === 4 && segments[3] === "notes" && method === "GET") {
+      return sendJson(response, 200, ticketNotes(ticket));
+    }
+    if (segments.length === 4 && segments[3] === "notes" && method === "POST") {
+      const note = parseNewNote(await readBody(request));
+      if (note === undefined) return sendJson(response, 400, { error: "text is required" });
+      return sendJson(response, 200, { id: addTicketNote(ticket, note) });
+    }
+    if (segments.length === 4 && segments[3] === "log" && method === "GET") {
+      const agent = url.searchParams.get("agent") ?? "";
+      response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      return void response.end(ticketRawLog(ticket, agent));
+    }
     const marksSeen =
       segments.length === 5 &&
       segments[3] === "alerts" &&
@@ -261,6 +358,19 @@ const route = async (
       const text = parseAnswerText(await readBody(request));
       if (text === undefined) return sendJson(response, 400, { error: "text is required" });
       const result = answerItem(ticket, id, text);
+      return sendJson(response, result === "answered" ? 200 : 409, { result });
+    }
+    const answersEarly =
+      segments.length === 6 &&
+      segments[3] === "grill" &&
+      segments[5] === "early" &&
+      method === "POST";
+    if (answersEarly) {
+      const qid = Number(segments[4]);
+      if (!Number.isInteger(qid)) return sendNotFound(response);
+      const text = parseAnswerText(await readBody(request));
+      if (text === undefined) return sendJson(response, 400, { error: "text is required" });
+      const result = answerEarly(ticket, qid, text);
       return sendJson(response, result === "answered" ? 200 : 409, { result });
     }
     return sendNotFound(response);

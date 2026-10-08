@@ -1,6 +1,23 @@
+import { fileDiffOf, filesViewOf, type FileDiff, type FilesView } from "./file-view.ts";
+import { storyViewOf, type StoryView } from "./story-view.ts";
 import fs from "node:fs";
 import path from "node:path";
-import { Store, type OpenHumanItem, type StoredAlert, type StoredDecision } from "./store.ts";
+import {
+  buildFailuresView,
+  countFailureKinds,
+  rawLogOf,
+  type FailuresView,
+  type KindCount,
+} from "./failure-view.ts";
+import { buildGrillView, type GrillView } from "./grill-view.ts";
+import type { MutantEvent, PlannedMutant } from "./mutant-events.ts";
+import {
+  Store,
+  type OpenHumanItem,
+  type StoredAlert,
+  type StoredDecision,
+  type StoredStreamEvent,
+} from "./store.ts";
 import {
   ENDED_STATES,
   WAITING_STATES,
@@ -12,10 +29,13 @@ import {
 import { THRESHOLDS } from "./thresholds.ts";
 import {
   STAGES,
+  stageOfKey,
+  type NewNote,
   type PipelineStage,
   type PipelineStep,
   type Stage,
   type StepStatus,
+  type StoredNote,
 } from "./types.ts";
 
 export const GAF =
@@ -25,6 +45,10 @@ export const GAF =
 const LEASE_ALIVE_MS = 60_000;
 const DEFAULT_SAMPLE_WINDOW_MS = 2 * 60 * 60 * 1000;
 const MAX_SAMPLES = 6000;
+const SNAPSHOT_EVENTS = 300;
+const DELTA_EVENTS = 500;
+const FAILURE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const VOLATILE_KEYS = new Set(["generatedAt", "elapsedMs", "heartbeatAgeSec"]);
 
 export const TICKET_STATES = [
   "running",
@@ -58,6 +82,7 @@ export type TicketSummary = {
   tokensOut: number;
   liveAgents: number;
   openItemCount: number;
+  awaitingGrill: { id: number; question: string } | null;
   recorded: boolean;
   unseenAlerts: StoredAlert[];
   activeRun: string | null;
@@ -68,7 +93,30 @@ export type TicketSummary = {
   updatedAt: number;
 };
 
-export type TicketDetail = {
+export type StreamEvent = {
+  seq: number;
+  at: string;
+  agent: string;
+  stage: Stage | null;
+  kind: string;
+  tool?: string;
+  cmd?: string;
+  why?: string;
+  ms?: number;
+  ok?: boolean;
+  text?: string;
+  mutant?: MutantEvent;
+};
+
+export type GateMark = { id: string; pass: boolean };
+
+export type TestsView = {
+  planned: PlannedMutant[];
+  mutants: MutantEvent[];
+  gates: GateMark[];
+};
+
+export type TicketParts = {
   summary: TicketSummary;
   pipeline: PipelineStage[];
   workers: WorkerRow[];
@@ -77,8 +125,26 @@ export type TicketDetail = {
   alerts: StoredAlert[];
   decisions: StoredDecision[];
   items: OpenHumanItem[];
-  samples: Sample[];
+  grill: GrillView;
+  tests: TestsView;
+};
+
+export type TicketDetail = TicketParts & {
+  samples: (Sample & { id: number })[];
+  events: StreamEvent[];
   generatedAt: string;
+};
+
+export type TicketDelta = Partial<TicketParts> & {
+  samples: (Sample & { id: number })[];
+  events: StreamEvent[];
+  generatedAt: string;
+};
+
+export type StreamState = {
+  eventSeq: number;
+  sampleId: number;
+  signatures: Partial<Record<keyof TicketParts, string>>;
 };
 
 export type HistoryEntry = {
@@ -196,6 +262,19 @@ export const deriveTicketState = (input: {
   return "running";
 };
 
+const awaitingGrillOf = (items: OpenHumanItem[]): TicketSummary["awaitingGrill"] => {
+  for (const item of items) {
+    const payload = item.payload;
+    const isGrill =
+      typeof payload === "object" && payload !== null && "grill" in payload && payload.grill === true;
+    if (isGrill && "id" in payload && typeof payload.id === "number") {
+      const question = "question" in payload && typeof payload.question === "string" ? payload.question : item.text;
+      return { id: payload.id, question };
+    }
+  }
+  return null;
+};
+
 const readSummary = (ticket: string, store: Store, nowMs: number): TicketSummary => {
   const pipeline = attempt(() => store.pipeline(), emptyPipeline());
   const workers = attempt(() => store.workers(ticket), []);
@@ -238,6 +317,7 @@ const readSummary = (ticket: string, store: Store, nowMs: number): TicketSummary
     tokensOut: cost.tokensOut,
     liveAgents: liveNow.length,
     openItemCount: attempt(() => store.openHumanItems().length, 0),
+    awaitingGrill: attempt(() => awaitingGrillOf(store.openHumanItems()), null),
     recorded: steps.length > 0,
     unseenAlerts: attempt(() => store.alerts(ticket, true), []).slice(-20),
     activeRun: alive ? (lease?.runId ?? null) : null,
@@ -264,33 +344,217 @@ export const ticketList = (): TicketSummary[] =>
     .map((ticket) => ticketSummary(ticket))
     .filter((summary): summary is TicketSummary => summary !== undefined);
 
-export const ticketDetail = (ticket: string, sinceIso?: string): TicketDetail | undefined =>
-  withStore<TicketDetail | undefined>(
+const toStreamEvent = (row: StoredStreamEvent): StreamEvent => {
+  const data = parseData(row.data);
+  const event: StreamEvent = {
+    seq: row.seq,
+    at: row.at,
+    agent: row.agent,
+    stage: stageOfKey(row.phase) ?? null,
+    kind: row.kind,
+  };
+  if (row.kind === "mutant") return { ...event, mutant: data as unknown as MutantEvent };
+  if (row.kind === "tool_use" || row.kind === "tool_result" || row.kind === "tool_error") {
+    return {
+      ...event,
+      tool: typeof data.tool === "string" ? data.tool : undefined,
+      cmd: typeof data.cmd === "string" ? data.cmd : undefined,
+      why: typeof data.why === "string" && data.why.length > 0 ? data.why : undefined,
+      ms: typeof data.ms === "number" ? data.ms : undefined,
+      ok: typeof data.ok === "boolean" ? data.ok : undefined,
+      text: row.kind === "tool_error" ? row.summary : undefined,
+    };
+  }
+  return { ...event, text: row.summary.slice(0, 300) };
+};
+
+const parseData = (json: string | null): Record<string, unknown> => {
+  if (json === null) return {};
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+};
+
+const GATE_MARK = /\b(D\d+)=([TF])\b/g;
+
+const readTests = (store: Store): TestsView => {
+  const planned = new Map<number, PlannedMutant>();
+  for (const row of store.eventsOfKind("mutant_plan")) {
+    const data = parseData(row.data);
+    for (const mutant of Array.isArray(data.mutants) ? (data.mutants as PlannedMutant[]) : []) {
+      planned.set(mutant.id, mutant);
+    }
+  }
+  const results = new Map<number, MutantEvent>();
+  for (const row of store.eventsOfKind("mutant")) {
+    const mutant = parseData(row.data) as unknown as MutantEvent;
+    results.set(mutant.id, mutant);
+  }
+  const line = store.latestForgeGateLine() ?? "";
+  return {
+    planned: [...planned.values()].sort((a, b) => a.id - b.id),
+    mutants: [...results.values()].sort((a, b) => a.id - b.id),
+    gates: [...line.matchAll(GATE_MARK)].map((match) => ({ id: match[1] ?? "", pass: match[2] === "T" })),
+  };
+};
+
+const readParts = (ticket: string, store: Store, nowMs: number): TicketParts => {
+  const summary = readSummary(ticket, store, nowMs);
+  const workers = attempt(() => store.workers(ticket), []);
+  const liveWorkerIds = workers
+    .filter((worker) => !ENDED_STATES.includes(worker.state))
+    .filter((worker) => summary.activeRun !== null && worker.runId === summary.activeRun)
+    .map((worker) => worker.id);
+  return {
+    summary,
+    pipeline: attempt(() => store.pipeline(), emptyPipeline()),
+    workers,
+    liveWorkerIds,
+    cost: attempt(() => store.costRollup(ticket), emptyCost()),
+    alerts: attempt(() => store.alerts(ticket, false), []),
+    decisions: attempt(() => store.decisions(), []),
+    items: attempt(() => store.openHumanItems(), []),
+    grill: attempt(
+      () =>
+        buildGrillView({
+          pack: path.join(GAF, ticket),
+          items: store.grillItems(),
+          early: store.earlyAnswers(ticket),
+        }),
+      { questions: [] },
+    ),
+    tests: attempt(() => readTests(store), { planned: [], mutants: [], gates: [] }),
+  };
+};
+
+const lastOf = (numbers: number[], fallback: number): number =>
+  numbers.length === 0 ? fallback : Math.max(...numbers);
+
+const signatureOf = (value: unknown): string =>
+  JSON.stringify(value, (key, nested: unknown) => (VOLATILE_KEYS.has(key) ? undefined : nested));
+
+const signaturesOf = (parts: TicketParts): StreamState["signatures"] =>
+  Object.fromEntries(Object.entries(parts).map(([key, value]) => [key, signatureOf(value)]));
+
+export const ticketSnapshot = (
+  ticket: string,
+  sinceIso?: string,
+): { detail: TicketDetail; state: StreamState } | undefined =>
+  withStore<{ detail: TicketDetail; state: StreamState } | undefined>(
     ticket,
     (store) => {
       const nowMs = Date.now();
-      const summary = readSummary(ticket, store, nowMs);
+      const parts = readParts(ticket, store, nowMs);
       const since = sinceIso ?? new Date(nowMs - DEFAULT_SAMPLE_WINDOW_MS).toISOString();
-      const workers = attempt(() => store.workers(ticket), []);
-      const liveWorkerIds = workers
-        .filter((worker) => !ENDED_STATES.includes(worker.state))
-        .filter((worker) => summary.activeRun !== null && worker.runId === summary.activeRun)
-        .map((worker) => worker.id);
+      const samples = attempt(() => store.samples(ticket, since), []).slice(-MAX_SAMPLES);
+      const events = attempt(() => store.recentStreamEvents(SNAPSHOT_EVENTS), []).map(toStreamEvent);
+      const state: StreamState = {
+        eventSeq: lastOf(events.map((event) => event.seq), 0),
+        sampleId: lastOf(
+          samples.map((sample) => sample.id),
+          attempt(() => store.lastSampleId(ticket), 0),
+        ),
+        signatures: signaturesOf(parts),
+      };
       return {
-        summary,
-        pipeline: attempt(() => store.pipeline(), emptyPipeline()),
-        workers,
-        liveWorkerIds,
-        cost: attempt(() => store.costRollup(ticket), emptyCost()),
-        alerts: attempt(() => store.alerts(ticket, false), []),
-        decisions: attempt(() => store.decisions(), []),
-        items: attempt(() => store.openHumanItems(), []),
-        samples: attempt(() => store.samples(ticket, since), []).slice(-MAX_SAMPLES),
-        generatedAt: new Date(nowMs).toISOString(),
+        detail: { ...parts, samples, events, generatedAt: new Date(nowMs).toISOString() },
+        state,
       };
     },
     undefined,
   );
+
+export const ticketDelta = (
+  ticket: string,
+  previous: StreamState,
+): { delta: TicketDelta; state: StreamState } | undefined =>
+  withStore<{ delta: TicketDelta; state: StreamState } | undefined>(
+    ticket,
+    (store) => {
+      const nowMs = Date.now();
+      const parts = readParts(ticket, store, nowMs);
+      const signatures = signaturesOf(parts);
+      const changed = Object.fromEntries(
+        Object.entries(parts).filter(
+          ([key]) => signatures[key as keyof TicketParts] !== previous.signatures[key as keyof TicketParts],
+        ),
+      );
+      const events = store.streamEventsAfter(previous.eventSeq, DELTA_EVENTS).map(toStreamEvent);
+      const samples = store.samplesAfter(ticket, previous.sampleId);
+      const state: StreamState = {
+        eventSeq: lastOf(events.map((event) => event.seq), previous.eventSeq),
+        sampleId: lastOf(
+          samples.map((sample) => sample.id),
+          previous.sampleId,
+        ),
+        signatures,
+      };
+      const unchanged =
+        Object.keys(changed).length === 0 && events.length === 0 && samples.length === 0;
+      if (unchanged) return undefined;
+      return {
+        delta: { ...changed, samples, events, generatedAt: new Date(nowMs).toISOString() },
+        state,
+      };
+    },
+    undefined,
+  );
+
+export const ticketDetail = (ticket: string, sinceIso?: string): TicketDetail | undefined =>
+  ticketSnapshot(ticket, sinceIso)?.detail;
+
+const failureKinds = (): KindCount[] => {
+  const counts = new Map<string, KindCount>();
+  const since = Date.now() - FAILURE_WINDOW_MS;
+  for (const ticket of discoverTickets()) {
+    withStore(ticket, (store) => countFailureKinds(store, ticket, since, counts), undefined);
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count);
+};
+
+export const ticketFailures = (ticket: string): FailuresView | undefined =>
+  withStore<FailuresView | undefined>(
+    ticket,
+    (store) => buildFailuresView(ticket, store, failureKinds()),
+    undefined,
+  );
+
+const MAX_TIMELINE_TICKS = 20000;
+const MAX_REPLAY_EVENTS = 500;
+
+export const ticketToolTicks = (ticket: string): { agent: string; at: string }[] =>
+  withStore(ticket, (store) => store.toolTicks(MAX_TIMELINE_TICKS), []);
+
+export const ticketEventsUntil = (ticket: string, until: string): StreamEvent[] =>
+  withStore(ticket, (store) => store.streamEventsUntil(until, MAX_REPLAY_EVENTS).map(toStreamEvent), []);
+
+export const ticketStory = (ticket: string): StoryView | undefined =>
+  withStore<StoryView | undefined>(ticket, (store) => storyViewOf(store), undefined);
+
+export const ticketFiles = (ticket: string): FilesView | undefined =>
+  withStore<FilesView | undefined>(ticket, (store) => filesViewOf(store), undefined);
+
+export const ticketFileDiff = (ticket: string, file: string): FileDiff | undefined =>
+  withStore<FileDiff | undefined>(ticket, (store) => fileDiffOf(store, file), undefined);
+
+export const ticketNotes = (ticket: string): StoredNote[] =>
+  withStore<StoredNote[]>(ticket, (store) => store.notes(), []);
+
+export const addTicketNote = (ticket: string, note: NewNote): number => {
+  const store = new Store(dbPathOf(ticket), "");
+  try {
+    store.bindTicket(ticket);
+    return store.addNote(note);
+  } finally {
+    store.close();
+  }
+};
+
+export const ticketRawLog = (ticket: string, agent: string): string =>
+  withStore(ticket, (store) => rawLogOf(store, agent), "");
 
 const stageDuration = (stage: PipelineStage): number => {
   const starts = stage.steps
@@ -341,6 +605,20 @@ export const markSeen = (ticket: string, ids: number[]): void => {
 };
 
 export type AnswerResult = "answered" | "already-answered";
+
+export const answerEarly = (ticket: string, qid: number, text: string): AnswerResult => {
+  const store = new Store(dbPathOf(ticket), "");
+  try {
+    const asked = store.grillItems().some((item) => {
+      const payload = item.payload;
+      return typeof payload === "object" && payload !== null && "id" in payload && payload.id === qid;
+    });
+    if (asked) return "already-answered";
+    return store.saveEarlyAnswer(ticket, qid, text) ? "answered" : "already-answered";
+  } finally {
+    store.close();
+  }
+};
 
 export const answerItem = (ticket: string, id: string, text: string): AnswerResult => {
   const store = new Store(dbPathOf(ticket), "");

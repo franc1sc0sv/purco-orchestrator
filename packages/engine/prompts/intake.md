@@ -49,4 +49,7 @@ facts, because code uses them to size the ticket:
 - `acceptance_criteria`: how many separate acceptance criteria the ticket states.
   Count each checkable statement once.
 
+Also put `kind` on the handoff, once: one of `feature`, `bugfix`, `performance`, `ui`,
+`data` or `chore`. Pick the one that fits the ticket best.
+
 Count what the ticket says, not what you guess the plan will need.

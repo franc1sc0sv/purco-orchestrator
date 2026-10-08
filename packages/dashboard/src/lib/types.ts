@@ -56,6 +56,7 @@ export type TicketSummary = {
   tokensOut: number;
   liveAgents: number;
   openItemCount: number;
+  awaitingGrill: { id: number; question: string } | null;
   recorded: boolean;
   unseenAlerts: Alert[];
   activeRun: string | null;
@@ -160,13 +161,82 @@ export type Decision = {
 };
 
 export type Sample = {
+  id: number;
   workerId: string;
   at: string;
   tokens: number;
   costUsd: number;
 };
 
-export type TicketDetail = {
+export type GrillOption = { label: string; consequence?: string; example?: string };
+
+export type GrillDiagramMode = "now" | "changed" | "new";
+
+export type GrillDiagram = {
+  nodes: { id: string; label: string; sub?: string; mode: GrillDiagramMode }[];
+  edges: { from: string; to: string; label?: string }[];
+};
+
+export type GrillStatus = "open" | "upcoming" | "answered" | "parked" | "settled" | "assumed";
+
+export type GrillQuestion = {
+  id: number;
+  question: string;
+  whyOpen?: string;
+  evidence?: string;
+  explain?: string;
+  example?: string;
+  diagram?: GrillDiagram;
+  options: GrillOption[];
+  dependsOn: number[];
+  recommended?: string;
+  blocking: boolean;
+  status: GrillStatus;
+  itemId: string | null;
+  answer: string | null;
+  answeredVia: "dashboard" | "cli" | null;
+  early: boolean;
+};
+
+export type GrillView = { questions: GrillQuestion[] };
+
+export type MutantEvent = {
+  id: number;
+  file: string;
+  line: number;
+  before: string;
+  after: string;
+  status: "killed" | "survived" | "equivalent" | "error";
+  ms: number;
+  tests?: string[];
+};
+
+export type PlannedMutant = { id: number; file: string; line: number; before: string; after: string };
+
+export type GateMark = { id: string; pass: boolean };
+
+export type TestsView = {
+  planned: PlannedMutant[];
+  mutants: MutantEvent[];
+  gates: GateMark[];
+};
+
+export type StreamEvent = {
+  seq: number;
+  at: string;
+  agent: string;
+  stage: Stage | null;
+  kind: string;
+  tool?: string;
+  cmd?: string;
+  why?: string;
+  ms?: number;
+  ok?: boolean;
+  text?: string;
+  mutant?: MutantEvent;
+};
+
+export type TicketParts = {
   summary: TicketSummary;
   pipeline: PipelineStage[];
   workers: Worker[];
@@ -175,7 +245,19 @@ export type TicketDetail = {
   alerts: Alert[];
   decisions: Decision[];
   items: OpenItem[];
+  grill: GrillView;
+  tests: TestsView;
+};
+
+export type TicketDetail = TicketParts & {
   samples: Sample[];
+  events: StreamEvent[];
+  generatedAt: string;
+};
+
+export type TicketDelta = Partial<TicketParts> & {
+  samples: Sample[];
+  events: StreamEvent[];
   generatedAt: string;
 };
 
@@ -276,3 +358,106 @@ export type UsageSnapshot = {
   models: ModelUsage[];
   limits: PlanLimits;
 };
+
+export const isGrillItem = (item: OpenItem): boolean =>
+  typeof item.payload === "object" &&
+  item.payload !== null &&
+  "grill" in item.payload &&
+  item.payload.grill === true;
+
+export type FailureKind = { id: string; label: string };
+
+export type FailureMapStep = {
+  key: string;
+  baseKey: string;
+  stage: Stage;
+  status: StepStatus;
+  tries: number;
+};
+
+export type FailureMove = { label: string; detail: string; bad: boolean };
+
+export type FailureGroup = {
+  key: string;
+  kind: FailureKind;
+  stepKind: string;
+  title: string;
+  steps: string[];
+  tries: number;
+  expected: string | null;
+  got: string | null;
+  said: string | null;
+  fixedIn: string | null;
+  worker: string | null;
+  lastMoves: FailureMove[];
+};
+
+export type FailuresView = {
+  map: FailureMapStep[];
+  groups: FailureGroup[];
+  resume: { step: string; command: string } | null;
+  costUsd: number;
+  failedSteps: number;
+  kinds: (FailureKind & { count: number })[];
+};
+
+export const TICKET_KINDS = ["feature", "bugfix", "performance", "ui", "data", "chore"] as const;
+export type TicketKind = (typeof TICKET_KINDS)[number];
+
+export type StoryFile = { path: string; added: number; deleted: number; isNew: boolean };
+
+export type StoryLayer = { layer: string; added: number; deleted: number; files: StoryFile[] };
+
+export type StoryTable = { name: string; isNew: boolean; columns: string[]; references: string[]; migration: string };
+
+export type StoryText = {
+  line: string;
+  example?: { input: string; result: string };
+  labels?: Record<string, string>;
+  before?: string;
+  after?: string;
+  metrics?: { name: string; before: number; after: number; unit?: string }[];
+};
+
+export type StoryView = {
+  kind?: TicketKind;
+  story?: StoryText;
+  layers: StoryLayer[];
+  edges: { from: string; to: string; label?: string }[];
+  tables: StoryTable[];
+};
+
+export const NOTE_STATUSES = ["queued", "seen", "applied"] as const;
+export type NoteStatus = (typeof NOTE_STATUSES)[number];
+
+export type Note = {
+  id: number;
+  ticket: string;
+  targetAgent?: string;
+  file?: string;
+  line?: number;
+  text: string;
+  status: NoteStatus;
+  reply?: string;
+  createdAt: string;
+  seenAt?: string;
+  appliedAt?: string;
+  via: "dashboard" | "cli";
+};
+
+export type NewNote = { text: string; file?: string; line?: number; targetAgent?: string };
+
+export type FileEntry = {
+  path: string;
+  layer: string;
+  added: number;
+  removed: number;
+  isNew: boolean;
+  version: number;
+  agent?: string;
+  at?: string;
+};
+
+export type FilesView = { files: FileEntry[] };
+
+export type FileDiff = { path: string; isNew: boolean; diff: string };

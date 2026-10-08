@@ -1,3 +1,4 @@
+import { snapshotOf } from "./story-view.ts";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
@@ -66,6 +67,7 @@ import type { ReadOnlyPostgres } from "./postgres-tools.ts";
 import { MessageBus } from "./bus.ts";
 import { EscalationRegistry } from "./escalation.ts";
 import { buildHooks } from "./hooks.ts";
+import { takeNotes } from "./notes.ts";
 import { Lead, type LeadDecision, type LeadDecisionKind, type LeadEvent } from "./lead.ts";
 import {
   handleMessage,
@@ -136,6 +138,7 @@ type GateVerdict =
 
 const NO_RESULT = "no result";
 const BASE_BRANCH = "dev";
+const DASHBOARD_URL = "http://localhost:4317";
 
 const APPROVE = /^\s*(approve|approved|yes|y|ok|go|continue)\b/i;
 const STOP = /^\s*stop\b/i;
@@ -192,15 +195,18 @@ export class Orchestrator {
   constructor(config: RunConfig) {
     this.config = config;
     this.workflow = WORKFLOWS[config.workflow];
-    this.scratchpad = new Scratchpad(
-      config.runDir,
-      config.runId,
-      config.ticket,
-    );
     this.store = config.mailboxDb
       ? new Store(config.mailboxDb, config.runId)
       : undefined;
     this.store?.bindTicket(config.ticket);
+    if (config.workflow === "ticket") this.store?.setWorktree(config.worktree);
+    this.scratchpad = new Scratchpad(
+      config.runDir,
+      config.runId,
+      config.ticket,
+      true,
+      this.store,
+    );
     this.alerts = this.store
       ? new Alerts(this.store, config.runId, config.ticket)
       : undefined;
@@ -559,7 +565,7 @@ export class Orchestrator {
       case "intake":
         return `Run intake for ${ticket}. Write ${pack}/01-ticket-and-context.md. ${common}`;
       case "grill":
-        return `Find every decision ${ticket} leaves open, from ${pack}/01-ticket-and-context.md and the code it names. Write ${pack}/02a-open-questions.md and ${pack}/02a-open-questions.json. Look up every fact yourself and ask nothing. ${common}`;
+        return `Find every decision ${ticket} leaves open, from ${pack}/01-ticket-and-context.md and the code it names. Write ${pack}/02a-open-questions.md and ${pack}/02a-open-questions.json. Give every question its explain, example and option examples, and a diagram when it helps. Look up every fact yourself and ask nothing. ${common}`;
       case "plan":
         return `Plan ${ticket} from ${pack}/01-ticket-and-context.md, with ${pack}/03-decisions.md binding. Write ${pack}/02-plan.md and one brief per slice, and append only to ${pack}/03-decisions.md. ${common}`;
       case "build":
@@ -721,6 +727,7 @@ export class Orchestrator {
       resolvePath: (candidate) => this.resolvePath(candidate),
       recordHandoff: (agent, handoff) => {
         this.handoffs.set(`${job.key}:${agent}`, handoff);
+        if (handoff.appliedNotes?.length) this.store?.applyNotes(handoff.appliedNotes);
       },
     });
 
@@ -758,6 +765,10 @@ export class Orchestrator {
             tracker: job.tracker,
             recordFileWritten: (file) => this.journal.recordFile(job.key, file),
             meter,
+            takeNotes: (agent, toolInput) =>
+              this.store
+                ? takeNotes({ store: this.store, worktree: this.config.worktree, agent, toolInput })
+                : undefined,
             refuse: spec.testFilesOnly
               ? (tool, input) => testWriteRefusal(tool, input, this.config.worktree)
               : undefined,
@@ -1161,7 +1172,10 @@ export class Orchestrator {
     this.tracker.setPhase(step.phase);
     const result = await runGrill({
       pack: this.config.contextPack,
-      ask: (text) => this.humanRaw("question", text),
+      ask: (text, payload) => this.humanRaw("question", text, undefined, payload),
+      dashboardLink: (questionId) =>
+        `${DASHBOARD_URL}/#/t/${this.config.ticket}/plan?q=${questionId}`,
+      earlyAnswer: (questionId) => this.store?.earlyAnswer(this.config.ticket, questionId),
       prune: async (answered, answer, remaining) => {
         const decision = await this.leadDecide({
           kind: "grill_answer",
@@ -1258,6 +1272,15 @@ export class Orchestrator {
     }
     const verdict = sizeFor(facts);
     this.setSize(verdict.size, verdict.reasons.join("; "));
+  }
+
+  private recordStory(step: Step, outcome: PhaseOutcome): void {
+    if (!this.store) return;
+    const result = outcome.result;
+    if (step.phase === "intake" && result?.kind) this.store.setKind(result.kind);
+    if (step.phase !== "build" && step.phase !== "review") return;
+    if (result?.story) this.store.setStory(result.story);
+    this.store.setChanges(snapshotOf(this.config.worktree));
   }
 
   private raiseSizeForBriefs(): void {
@@ -1546,6 +1569,7 @@ export class Orchestrator {
 
       if (outcome.status === "done" && this.config.workflow === "ticket") {
         if (step.phase === "intake") this.sizeFromIntake(outcome);
+        this.recordStory(step, outcome);
         if (step.phase === "plan") this.raiseSizeForBriefs();
       }
 

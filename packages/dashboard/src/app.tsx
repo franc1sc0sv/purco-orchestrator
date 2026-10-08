@@ -8,7 +8,8 @@ import { useAlertNotifier } from "@/hooks/use-alert-notifier";
 import { useRoute } from "@/hooks/use-route";
 import { useStream, type StreamStatus } from "@/hooks/use-stream";
 import { TONES, type Tone } from "@/lib/colors";
-import type { TicketDetail, TicketSummary, UsageSnapshot } from "@/lib/types";
+import { applyDelta } from "@/lib/apply-delta";
+import type { TicketDelta, TicketDetail, TicketSummary, UsageSnapshot } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { HistoryScreen } from "@/screens/history";
 import { TicketsScreen } from "@/screens/tickets";
@@ -30,6 +31,11 @@ const isList = (value: unknown): value is ListSnapshot =>
 const isDetail = (value: unknown): value is TicketDetail =>
   isRecord(value) && isRecord(value.summary) && Array.isArray(value.pipeline);
 
+const isDelta = (value: unknown): value is TicketDelta =>
+  isRecord(value) && Array.isArray(value.events) && Array.isArray(value.samples);
+
+const DETAIL_MERGE = { acceptDelta: isDelta, apply: applyDelta };
+
 const STATUS_TONE: Record<StreamStatus, Tone> = {
   connecting: "waiting",
   live: "done",
@@ -45,7 +51,11 @@ const NavLink = ({ href, active, children }: { href: string; active: boolean; ch
 export const App = () => {
   const route = useRoute();
   const list = useStream<ListSnapshot>(null, isList);
-  const detail = useStream<TicketDetail>(route.name === "ticket" ? route.ticket : null, isDetail);
+  const detail = useStream<TicketDetail, TicketDelta>(
+    route.name === "ticket" ? route.ticket : null,
+    isDetail,
+    DETAIL_MERGE,
+  );
   useAlertNotifier(list.data?.tickets);
   const status = route.name === "ticket" ? detail.status : list.status;
 
@@ -82,7 +92,7 @@ export const App = () => {
           ) : null}
           {route.name === "ticket" ? (
             <Suspense fallback={<TicketSkeleton />}>
-              <TicketView detail={detail.data} review={route.review} />
+              <TicketView detail={detail.data} tab={route.tab} params={route.params} review={route.review} />
             </Suspense>
           ) : null}
           {route.name === "history" ? (

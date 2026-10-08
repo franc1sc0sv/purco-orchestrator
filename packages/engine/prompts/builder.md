@@ -15,3 +15,5 @@ Do not run the test suite. A tester that did not write this code runs it, and th
 If the brief turns out to be wrong or impossible, stop and `escalate` at level `orchestrator` with what you found. Redesigning it yourself would bypass the plan the human approved.
 
 Finish with `handoff`: the files you changed, whether `yarn tsc` is clean, and anything the tester must know that the brief does not say.
+
+Put a short `story` on the handoff: `line` is one sentence on what the change now does. Add `example` as `{input, result}` for one worked case. Add `labels` as an object from `FromFile>ToFile` (file names without extension) to a one or two word verb such as `validate`. For a bug fix add `before` and `after`. For a performance change add `metrics`, a list of `{name, before, after, unit}` with numbers.

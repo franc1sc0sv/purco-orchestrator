@@ -5,6 +5,7 @@ import type {
   HookJSONOutput,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { WorkerMeter } from "./meter.ts";
+import { mutantEventsOf, rememberMutants, type KnownMutants } from "./mutant-events.ts";
 import { touchesProtectedFile } from "./protected-files.ts";
 import type { Scratchpad } from "./scratchpad.ts";
 import type { SubagentTracker } from "./tracker.ts";
@@ -65,24 +66,39 @@ export const isReadOnlySql = (sql: string): boolean => {
   return true;
 };
 
-export const describeInput =(input: Record<string, unknown>): string => {
-  const interesting = [
-    "command",
-    "file_path",
-    "pattern",
-    "path",
-    "prompt",
-    "description",
-    "subagent_type",
-    "url",
-  ];
-  for (const key of interesting) {
+const INPUT_TARGET_KEYS = [
+  "command",
+  "file_path",
+  "pattern",
+  "path",
+  "prompt",
+  "description",
+  "subagent_type",
+  "url",
+];
+
+const targetOf = (input: Record<string, unknown>): { key: string; value: string } | undefined => {
+  for (const key of INPUT_TARGET_KEYS) {
     const value = input?.[key];
     if (typeof value === "string" && value.length > 0) {
-      return `${key}=${value.replace(/\s+/g, " ").slice(0, 140)}`;
+      return { key, value: value.replace(/\s+/g, " ").slice(0, 140) };
     }
   }
-  return "";
+  return undefined;
+};
+
+export const describeInput = (input: Record<string, unknown>): string => {
+  const target = targetOf(input);
+  return target ? `${target.key}=${target.value}` : "";
+};
+
+const WHY_TOOLS = new Set(["Bash", "Agent", "Task"]);
+
+const whyOf = (tool: string, input: Record<string, unknown>): string => {
+  const description = input?.description;
+  return WHY_TOOLS.has(tool) && typeof description === "string"
+    ? description.replace(/\s+/g, " ").slice(0, 140)
+    : "";
 };
 
 const WRITING_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
@@ -93,8 +109,18 @@ export const buildHooks = (deps: {
   recordFileWritten: (file: string) => void;
   refuse?: (tool: string, input: Record<string, unknown>) => string | undefined;
   meter?: WorkerMeter;
+  takeNotes?: (agent: string, toolInput: Record<string, unknown>) => string | undefined;
 }): Partial<Record<HookEvent, HookCallbackMatcher[]>> => {
-  const { scratchpad, tracker, recordFileWritten, refuse, meter } = deps;
+  const { scratchpad, tracker, recordFileWritten, refuse, meter, takeNotes } = deps;
+  const startedAt = new Map<string, number>();
+  const knownMutants: KnownMutants = new Map();
+
+  const elapsedMs = (toolUseId: string | undefined): number | undefined => {
+    if (toolUseId === undefined) return undefined;
+    const started = startedAt.get(toolUseId);
+    startedAt.delete(toolUseId);
+    return started === undefined ? undefined : Date.now() - started;
+  };
 
   const onPreToolUse = async (
     input: HookInput,
@@ -143,15 +169,24 @@ export const buildHooks = (deps: {
       );
     }
     meter?.toolStart(input.tool_name, input.tool_input as Record<string, unknown>);
-    const detail = describeInput(input.tool_input as Record<string, unknown>);
+    const toolInput = input.tool_input as Record<string, unknown>;
+    const detail = describeInput(toolInput);
+    if (toolUseId !== undefined) startedAt.set(toolUseId, Date.now());
     scratchpad.record(
       tracker.active(),
       tracker.currentPhase(),
       "tool_use",
       detail ? `${input.tool_name} ${detail}` : input.tool_name,
-      { toolUseId, tool: input.tool_name },
+      {
+        toolUseId,
+        tool: input.tool_name,
+        cmd: targetOf(toolInput)?.value ?? "",
+        why: whyOf(input.tool_name, toolInput),
+      },
     );
-    return PROCEED;
+    const notes = takeNotes?.(tracker.active(), toolInput);
+    if (notes === undefined) return PROCEED;
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: notes } };
   };
 
   const onPostToolUse = async (
@@ -164,13 +199,31 @@ export const buildHooks = (deps: {
       const file = (input.tool_input as { file_path?: unknown }).file_path;
       if (typeof file === "string" && file.length > 0) recordFileWritten(file);
     }
-    scratchpad.record(
-      tracker.active(),
-      tracker.currentPhase(),
-      "tool_result",
-      input.tool_name,
-      { toolUseId },
-    );
+    const ms = elapsedMs(toolUseId);
+    const agent = tracker.active();
+    const phase = tracker.currentPhase();
+    scratchpad.record(agent, phase, "tool_result", input.tool_name, {
+      toolUseId,
+      tool: input.tool_name,
+      ms,
+      ok: true,
+    });
+    const response = (input as { tool_response?: unknown }).tool_response;
+    const planned = rememberMutants(input.tool_name, response, knownMutants);
+    if (planned.length > 0) {
+      scratchpad.record(agent, phase, "mutant_plan", `planned ${planned.length} mutants`, {
+        mutants: planned,
+      });
+    }
+    for (const mutant of mutantEventsOf({
+      tool: input.tool_name,
+      toolInput: input.tool_input as Record<string, unknown>,
+      response,
+      known: knownMutants,
+      ms: ms ?? 0,
+    })) {
+      scratchpad.record(agent, phase, "mutant", `mutant ${mutant.id} ${mutant.status}`, { ...mutant });
+    }
     return PROCEED;
   };
 
@@ -192,7 +245,7 @@ export const buildHooks = (deps: {
       tracker.currentPhase(),
       "tool_error",
       `${input.tool_name} failed — ${reason}`,
-      { toolUseId, tool: input.tool_name },
+      { toolUseId, tool: input.tool_name, ms: elapsedMs(toolUseId), ok: false },
     );
     return PROCEED;
   };

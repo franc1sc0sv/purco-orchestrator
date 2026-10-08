@@ -22,6 +22,8 @@ const KIND_GLYPH: Record<EventKind, string> = {
   message: "MSG",
   handoff: "HANDOFF",
   permission_denied: "DENIED",
+  mutant: "MUTANT",
+  mutant_plan: "PLAN",
   cost: "COST",
 };
 

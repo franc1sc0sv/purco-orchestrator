@@ -14,6 +14,8 @@ import {
 import {
   STAGES,
   stageOfKey,
+  type AppliedNote,
+  type ChangeSnapshot,
   type Finding,
   type FindingStatus,
   type PipelineStage,
@@ -21,10 +23,15 @@ import {
   type ScratchpadEvent,
   type Site,
   type SiteState,
+  type NewNote,
+  type NoteStatus,
   type Stage,
+  type Story,
   type StepResult,
   type StepStatus,
+  type StoredNote,
   type StoredPhase,
+  type TicketKind,
   type StoredQuestion,
 } from "./types.ts";
 
@@ -47,6 +54,39 @@ export type StoredStep = {
   status: StepStatus;
   startedAt?: string;
   result?: StepResult;
+};
+
+export type StoredStepRow = {
+  key: string;
+  baseKey: string;
+  attempt: number;
+  stage: Stage;
+  status: StepStatus;
+  reason: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+};
+
+export type StoredEarlyAnswer = { qid: number; answer: string; at: string };
+
+export type StoredGrillItem = {
+  id: string;
+  question: string;
+  answer: string | null;
+  answeredAt: string | null;
+  answeredVia: string | null;
+  answeredBy: string | null;
+  payload: unknown;
+};
+
+export type StoredStreamEvent = {
+  seq: number;
+  at: string;
+  agent: string;
+  phase: string;
+  kind: string;
+  summary: string;
+  data: string | null;
 };
 
 export type DecisionInput = {
@@ -331,6 +371,31 @@ create table if not exists alerts (
   dedupe_key text
 );
 
+create table if not exists early_answers (
+  ticket text not null,
+  qid    integer not null,
+  answer text not null,
+  at     text not null,
+  primary key (ticket, qid)
+);
+
+create table if not exists notes (
+  id           integer primary key autoincrement,
+  ticket       text not null,
+  target_agent text,
+  file         text,
+  line         integer,
+  text         text not null,
+  status       text not null default 'queued',
+  reply        text,
+  created_at   text not null,
+  seen_at      text,
+  applied_at   text,
+  via          text not null default 'dashboard'
+);
+
+create index if not exists notes_ticket_idx on notes (ticket, status);
+
 create unique index if not exists alerts_dedupe_idx on alerts (run_id, dedupe_key) where dedupe_key is not null;
 create index if not exists alerts_ticket_idx on alerts (ticket, seen, id);
 create index if not exists workers_ticket_idx on workers (ticket, state);
@@ -408,9 +473,16 @@ export class Store {
       },
       questions: {
         payload_json: "text",
+        answered_via: "text",
       },
       alerts: {
         title: "text",
+      },
+      tickets: {
+        kind: "text",
+        story_json: "text",
+        worktree: "text",
+        changes_json: "text",
       },
     };
     for (const [table, columns] of Object.entries(wanted)) {
@@ -702,6 +774,49 @@ export class Store {
     return row?.size ? { size: row.size, reason: row.reason ?? "" } : undefined;
   }
 
+  setKind(kind: TicketKind): void {
+    this.setTicketColumn("kind", kind);
+  }
+
+  setStory(story: Story): void {
+    this.setTicketColumn("story_json", JSON.stringify(story));
+  }
+
+  setWorktree(worktree: string): void {
+    this.setTicketColumn("worktree", worktree);
+  }
+
+  setChanges(changes: ChangeSnapshot): void {
+    this.setTicketColumn("changes_json", JSON.stringify(changes));
+  }
+
+  private setTicketColumn(column: "kind" | "story_json" | "worktree" | "changes_json", value: string): void {
+    this.db
+      .prepare(
+        `insert into tickets (ticket, ${column}, updated_at) values (?, ?, ?)
+         on conflict (ticket) do update set ${column} = excluded.${column}, updated_at = excluded.updated_at`,
+      )
+      .run(this.ticketName(), value, new Date().toISOString());
+  }
+
+  storyRow(): { kind?: TicketKind; story?: Story; worktree?: string; changes?: ChangeSnapshot } {
+    const column = (name: string): string => (this.hasColumn("tickets", name) ? name : `null as ${name}`);
+    const row = this.db
+      .prepare(
+        `select ${column("kind")}, ${column("story_json")}, ${column("worktree")}, ${column("changes_json")}
+           from tickets where ticket = ?`,
+      )
+      .get(this.ticketName()) as
+      | { kind: TicketKind | null; story_json: string | null; worktree: string | null; changes_json: string | null }
+      | undefined;
+    return {
+      kind: row?.kind ?? undefined,
+      story: row?.story_json ? JSON.parse(row.story_json) : undefined,
+      worktree: row?.worktree ?? undefined,
+      changes: row?.changes_json ? JSON.parse(row.changes_json) : undefined,
+    };
+  }
+
   takeLease(
     input: { pid: number; host: string; now: Date },
     mayTake: (held: LeaseRow) => boolean,
@@ -877,13 +992,13 @@ export class Store {
     return rows.map(toWorkerRow);
   }
 
-  samples(ticket: string, sinceIso: string): Sample[] {
+  samples(ticket: string, sinceIso: string): (Sample & { id: number })[] {
     return this.db
       .prepare(
-        `select worker_id as workerId, at, tokens, cost_usd as costUsd
+        `select id, worker_id as workerId, at, tokens, cost_usd as costUsd
            from samples where ticket = ? and at >= ? order by at, id`,
       )
-      .all(ticket, sinceIso) as unknown as Sample[];
+      .all(ticket, sinceIso) as unknown as (Sample & { id: number })[];
   }
 
   costRollup(ticket: string): CostRollup {
@@ -1014,11 +1129,235 @@ export class Store {
   answerQuestion(id: string, answer: string, answeredBy: string): boolean {
     const result = this.db
       .prepare(
-        `update questions set answer = ?, answered_at = ?, answered_by = ?
+        `update questions set answer = ?, answered_at = ?, answered_by = ?, answered_via = ?
           where id = ? and answered_at is null`,
       )
-      .run(answer, new Date().toISOString(), answeredBy, id);
+      .run(
+        answer,
+        new Date().toISOString(),
+        answeredBy,
+        answeredBy === "dashboard" ? "dashboard" : "cli",
+        id,
+      );
     return Number(result.changes) > 0;
+  }
+
+  addNote(note: NewNote): number {
+    const result = this.db
+      .prepare(
+        `insert into notes (ticket, target_agent, file, line, text, status, created_at, via)
+         values (?, ?, ?, ?, ?, 'queued', ?, ?)`,
+      )
+      .run(
+        this.ticketName(),
+        note.targetAgent ?? null,
+        note.file ?? null,
+        note.line ?? null,
+        note.text,
+        new Date().toISOString(),
+        note.via,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  notes(status?: NoteStatus): StoredNote[] {
+    if (!this.hasTable("notes")) return [];
+    const rows = this.db
+      .prepare(
+        `select id, ticket, target_agent as targetAgent, file, line, text, status, reply,
+                created_at as createdAt, seen_at as seenAt, applied_at as appliedAt, via
+           from notes where ticket = ? and (? is null or status = ?) order by id`,
+      )
+      .all(this.ticketName(), status ?? null, status ?? null) as unknown as Record<string, unknown>[];
+    return rows.map(
+      (row) =>
+        Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null)) as unknown as StoredNote,
+    );
+  }
+
+  markNotesSeen(ids: number[]): void {
+    const mark = this.db.prepare("update notes set status = 'seen', seen_at = ? where id = ? and status = 'queued'");
+    const at = new Date().toISOString();
+    for (const id of ids) mark.run(at, id);
+  }
+
+  applyNotes(applied: AppliedNote[]): void {
+    const mark = this.db.prepare(
+      `update notes set status = 'applied', reply = ?, applied_at = ?, seen_at = coalesce(seen_at, ?)
+        where id = ? and ticket = ? and status != 'applied'`,
+    );
+    const at = new Date().toISOString();
+    for (const note of applied) mark.run(note.reply, at, at, note.id, this.ticketName());
+  }
+
+  fileWrites(): { agent: string; at: string; file: string }[] {
+    return this.eventsOfKind("tool_use").flatMap((event) => {
+      try {
+        const data = JSON.parse(event.data ?? "{}") as { tool?: unknown; cmd?: unknown };
+        const writes = data.tool === "Write" || data.tool === "Edit" || data.tool === "MultiEdit";
+        return writes && typeof data.cmd === "string" && data.cmd.length > 0
+          ? [{ agent: event.agent, at: event.at, file: data.cmd }]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  private hasColumn(table: string, column: string): boolean {
+    return (
+      this.db
+        .prepare(`select 1 from pragma_table_info('${table}') where name = ?`)
+        .get(column) !== undefined
+    );
+  }
+
+  private hasTable(table: string): boolean {
+    return (
+      this.db.prepare("select 1 from sqlite_master where type = 'table' and name = ?").get(table) !==
+      undefined
+    );
+  }
+
+  earlyAnswer(ticket: string, qid: number): string | undefined {
+    if (!this.hasTable("early_answers")) return undefined;
+    const row = this.db
+      .prepare("select answer from early_answers where ticket = ? and qid = ?")
+      .get(ticket, qid) as { answer: string } | undefined;
+    return row?.answer;
+  }
+
+  saveEarlyAnswer(ticket: string, qid: number, answer: string): boolean {
+    const result = this.db
+      .prepare(
+        `insert into early_answers (ticket, qid, answer, at) values (?, ?, ?, ?)
+         on conflict (ticket, qid) do nothing`,
+      )
+      .run(ticket, qid, answer, new Date().toISOString());
+    return Number(result.changes) > 0;
+  }
+
+  earlyAnswers(ticket: string): StoredEarlyAnswer[] {
+    if (!this.hasTable("early_answers")) return [];
+    return this.db
+      .prepare("select qid, answer, at from early_answers where ticket = ? order by qid")
+      .all(ticket) as unknown as StoredEarlyAnswer[];
+  }
+
+  grillItems(): StoredGrillItem[] {
+    const via = this.hasColumn("questions", "answered_via") ? "answered_via" : "null";
+    const rows = this.db
+      .prepare(
+        `select id, question, answer, answered_at as answeredAt, ${via} as answeredVia,
+                answered_by as answeredBy, payload_json as payloadJson
+           from questions
+          where payload_json like '%"grill":true%'
+          order by at`,
+      )
+      .all() as unknown as (Omit<StoredGrillItem, "payload"> & { payloadJson: string })[];
+    return rows.map(({ payloadJson, ...row }) => ({ ...row, payload: parsePayload(payloadJson) }));
+  }
+
+  streamEventsAfter(afterSeq: number, limit: number): StoredStreamEvent[] {
+    return this.db
+      .prepare(
+        `select rowid as seq, at, agent, phase, kind, summary, data
+           from events where rowid > ? order by rowid limit ?`,
+      )
+      .all(afterSeq, limit) as unknown as StoredStreamEvent[];
+  }
+
+  toolTicks(limit: number): { agent: string; at: string }[] {
+    return this.db
+      .prepare(`select agent, at from events where kind = 'tool_use' order by rowid limit ?`)
+      .all(limit) as unknown as { agent: string; at: string }[];
+  }
+
+  streamEventsUntil(until: string, limit: number): StoredStreamEvent[] {
+    const rows = this.db
+      .prepare(
+        `select rowid as seq, at, agent, phase, kind, summary, data
+           from events where at <= ? order by rowid desc limit ?`,
+      )
+      .all(until, limit) as unknown as StoredStreamEvent[];
+    return rows.reverse();
+  }
+
+  eventsOfKind(kind: string): StoredStreamEvent[] {
+    return this.db
+      .prepare(
+        `select rowid as seq, at, agent, phase, kind, summary, data
+           from events where kind = ? order by rowid`,
+      )
+      .all(kind) as unknown as StoredStreamEvent[];
+  }
+
+  stepRows(): StoredStepRow[] {
+    return this.db
+      .prepare(
+        `select step as key, base_key as baseKey, attempt, stage, status,
+                reason, started_at as startedAt, ended_at as endedAt
+           from steps where ticket = ? order by seq`,
+      )
+      .all(this.ticketName()) as unknown as StoredStepRow[];
+  }
+
+  eventsOfAgent(agent: string, kinds: string[], limit: number): StoredStreamEvent[] {
+    const marks = kinds.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `select rowid as seq, at, agent, phase, kind, summary, data
+           from events where agent = ? and kind in (${marks})
+          order by rowid desc limit ?`,
+      )
+      .all(agent, ...kinds, limit) as unknown as StoredStreamEvent[];
+    return rows.reverse();
+  }
+
+  allEventsOfAgent(agent: string): StoredStreamEvent[] {
+    return this.db
+      .prepare(
+        `select rowid as seq, at, agent, phase, kind, summary, data
+           from events where agent = ? order by rowid`,
+      )
+      .all(agent) as unknown as StoredStreamEvent[];
+  }
+
+  latestForgeGateLine(): string | undefined {
+    const row = this.db
+      .prepare(
+        `select summary from events
+          where kind = 'note' and summary like 'forge: pass %: D1=%'
+          order by rowid desc limit 1`,
+      )
+      .get() as { summary: string } | undefined;
+    return row?.summary;
+  }
+
+  recentStreamEvents(limit: number): StoredStreamEvent[] {
+    const rows = this.db
+      .prepare(
+        `select rowid as seq, at, agent, phase, kind, summary, data
+           from events order by rowid desc limit ?`,
+      )
+      .all(limit) as unknown as StoredStreamEvent[];
+    return rows.reverse();
+  }
+
+  samplesAfter(ticket: string, afterId: number): (Sample & { id: number })[] {
+    return this.db
+      .prepare(
+        `select id, worker_id as workerId, at, tokens, cost_usd as costUsd
+           from samples where ticket = ? and id > ? order by id`,
+      )
+      .all(ticket, afterId) as unknown as (Sample & { id: number })[];
+  }
+
+  lastSampleId(ticket: string): number {
+    const row = this.db
+      .prepare("select max(id) as last from samples where ticket = ?")
+      .get(ticket) as { last: number | null };
+    return row.last ?? 0;
   }
 
   hasHumanItem(id: string): boolean {

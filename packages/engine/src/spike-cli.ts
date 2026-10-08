@@ -1,4 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
+import { GAF } from "./dashboard-data.ts";
+import { noteLabel } from "./notes.ts";
 import { Store } from "./store.ts";
 import type { StoredPhase } from "./types.ts";
 
@@ -8,6 +11,8 @@ const usage = `usage: purco-spike <command> --db <file> --run <id> [options]
   questions  print the open questions and exit
   answer     --id <question id> --text "<answer>"
   status     phases, sites, findings and open questions
+
+usage: purco-spike note <TICKET> [--agent <label>] [--file <path> --line <n>] "<text>"
 `;
 
 const parse = (): { command: string; args: Record<string, string> } => {
@@ -206,7 +211,45 @@ const cmdWatch = async (args: Record<string, string>): Promise<void> => {
   }
 };
 
+const cmdNote = (): void => {
+  const rest = process.argv.slice(3);
+  const flags: Record<string, string> = {};
+  const positional: string[] = [];
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index] ?? "";
+    if (!token.startsWith("--")) {
+      positional.push(token);
+      continue;
+    }
+    const value = rest[index + 1];
+    if (!value) throw new Error(`${token} needs a value\n\n${usage}`);
+    flags[token.slice(2)] = value;
+    index += 1;
+  }
+  const [ticket, ...words] = positional;
+  const text = words.join(" ").trim();
+  if (!ticket || !text) throw new Error(`note needs a ticket and a text\n\n${usage}`);
+  const line = flags.line === undefined ? undefined : Number(flags.line);
+  if (line !== undefined && (!Number.isInteger(line) || line < 1)) {
+    throw new Error(`--line must be a positive integer\n\n${usage}`);
+  }
+  const dbPath = path.join(GAF, ticket, "orchestrator.sqlite");
+  if (!fs.existsSync(dbPath)) throw new Error(`No orchestrator store for ${ticket} in ${GAF}`);
+  const store = new Store(dbPath, "");
+  store.bindTicket(ticket);
+  const id = store.addNote({
+    text,
+    via: "cli",
+    ...(flags.agent ? { targetAgent: flags.agent } : {}),
+    ...(flags.file ? { file: flags.file } : {}),
+    ...(line === undefined ? {} : { line }),
+  });
+  store.close();
+  process.stdout.write(`Queued ${noteLabel(id)} for ${ticket}.\n`);
+};
+
 const main = async (): Promise<void> => {
+  if (process.argv[2] === "note") return cmdNote();
   const { command, args } = parse();
   if (command === "questions") return cmdQuestions(args);
   if (command === "answer") return cmdAnswer(args);
