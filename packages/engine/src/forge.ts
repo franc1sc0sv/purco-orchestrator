@@ -1028,16 +1028,17 @@ const INITIAL_RUN_FAILED = /failed tests in the initial test run/i;
 
 const failingTestWork = async (ctx: Ctx): Promise<Map<string, string[]>> => {
   const files = passTestFiles(ctx);
+  const command = ctx.commands.test ?? commandsFor(ctx.scope).test ?? "";
   const run = await tracked(
     ctx,
     {
       kind: "suite",
       label: "Test suite",
       detail: `${files.length} test files on unchanged code`,
-      command: ctx.commands.test,
+      command,
       testFiles: files,
     },
-    () => execSuite({ cwd: ctx.cwd, command: ctx.commands.test, files }),
+    () => execSuite({ cwd: ctx.cwd, command, files }),
   );
   const work = new Map<string, string[]>();
   for (const failure of run.failures) {
