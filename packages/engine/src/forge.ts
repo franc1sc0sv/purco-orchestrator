@@ -25,6 +25,7 @@ import { waiverRecordBatch } from "test-forge-mcp-server/src/application/ledger/
 import { mutationEquivalenceRecord } from "test-forge-mcp-server/src/application/mutation/equivalence-record.ts";
 import { onShutdown } from "./lease.ts";
 import { harnessStart, harnessStop } from "test-forge-mcp-server/src/application/stryker/harness.ts";
+import { execSuite } from "test-forge-mcp-server/src/application/execution/run-suite.ts";
 import { mutationPass } from "test-forge-mcp-server/src/application/stryker/mutation-pass.ts";
 import { ATTACH_CONFIG_FILE } from "test-forge-mcp-server/src/infrastructure/stryker-files.ts";
 import type { TestedMutant } from "test-forge-mcp-server/src/application/stryker/run.ts";
@@ -230,7 +231,7 @@ const commandsFor = (scope: ForgeScope): GateCommands => ({
   lint: "yarn lint",
 });
 
-const ATTACHED_BACKEND_TEST = `NODE_OPTIONS='--max-old-space-size=8192' yarn vitest run --config ${ATTACH_CONFIG_FILE}`;
+const ATTACHED_BACKEND_TEST = `NODE_OPTIONS='--max-old-space-size=8192' yarn vitest run --maxWorkers=2 --config ${ATTACH_CONFIG_FILE}`;
 
 const unitsFile = (ctx: Ctx): string => path.join(ctx.dir, "units.json");
 const baselineFile = (ctx: Ctx): string => path.join(ctx.dir, "harden-baseline.json");
@@ -262,6 +263,7 @@ const engagement = (ctx: Ctx, lines: string[]): string =>
     `- runId: ${ctx.runId}`,
     `- cwd: ${ctx.cwd}`,
     `- scope: ${ctx.scope}`,
+    `- only tests in the ${ctx.scope} vitest project can kill these mutants; a test in another project does not count`,
     ...lines,
   ].join("\n");
 
@@ -797,9 +799,14 @@ const runPass = async (ctx: Ctx, label: string): Promise<string | undefined> => 
   return undefined;
 };
 
+const NEEDS_TEST: ReadonlySet<string> = new Set(["survived", "no_coverage", "refuted"]);
+
+const needingTest = (ctx: Ctx): LedgerMutant[] =>
+  ledgerMutants(ctx.runId).filter((mutant) => NEEDS_TEST.has(mutant.outcome));
+
 const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]): Promise<string | undefined> => {
   if (ctx.host.stopped()) return "The run was stopped.";
-  const open = new Set(openMutants(ledgerMutants(ctx.runId)).map((mutant) => mutant.id));
+  const open = new Set(needingTest(ctx).map((mutant) => mutant.id));
   const jobs = strykerRowsOf(openDb(), ctx.runId)
     .filter((row) => open.has(row.id))
     .map((row) => {
@@ -817,6 +824,31 @@ const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]):
     `re-check ${label}: ${jobs.length} open mutant(s), ${countsText(ledgerMutants(ctx.runId))}, ${Math.round((Date.now() - startedAt) / 1000)} s`,
   );
   return undefined;
+};
+
+const INITIAL_RUN_FAILED = /failed tests in the initial test run/i;
+
+const failingTestWork = async (ctx: Ctx): Promise<Map<string, string[]>> => {
+  const run = await execSuite({ cwd: ctx.cwd, command: ctx.commands.test, files: passTestFiles(ctx) });
+  const work = new Map<string, string[]>();
+  for (const failure of run.failures) {
+    addLines(work, path.relative(ctx.cwd, path.resolve(ctx.cwd, failure.file)), [
+      `The test "${failure.testName}" fails on the unchanged production code, so the mutation baseline cannot start. Fix the test, not the production code. Failure: ${failure.message.slice(0, 400)}`,
+    ]);
+  }
+  return work;
+};
+
+const runBaseline = async (ctx: Ctx): Promise<string | undefined> => {
+  let failingBefore = Number.POSITIVE_INFINITY;
+  for (let attempt = 1; ; attempt += 1) {
+    const failure = await runPass(ctx, attempt === 1 ? "baseline" : `baseline-${attempt}`);
+    if (!failure || !INITIAL_RUN_FAILED.test(failure)) return failure;
+    const work = await failingTestWork(ctx);
+    if (work.size === 0 || work.size >= failingBefore) return failure;
+    failingBefore = work.size;
+    await write(ctx, work, `repair-${attempt}`);
+  }
 };
 
 const productionDigest = (ctx: Ctx): string => {
@@ -1079,7 +1111,7 @@ const mutationStage = async (ctx: Ctx): Promise<string | undefined> => {
     fs.existsSync(baselineDigestFile(ctx)) &&
     fs.readFileSync(baselineDigestFile(ctx), "utf8") === current;
   if (!reusable) {
-    const baseline = await runPass(ctx, "baseline");
+    const baseline = await runBaseline(ctx);
     if (baseline) return baseline;
     fs.writeFileSync(baselineDigestFile(ctx), current);
   }
@@ -1091,18 +1123,15 @@ const mutationStage = async (ctx: Ctx): Promise<string | undefined> => {
   fs.writeFileSync(eligibleFile(ctx), JSON.stringify({ ids: [...ctx.eligible] }));
   ctx.host.log(`mutation baseline: ${first.length} in scope, ${ctx.eligible.size} open`);
 
-  const openCount = (): number => openMutants(ledgerMutants(ctx.runId)).length;
+  const openCount = (): number => needingTest(ctx).length;
 
-  for (let round = 1, before = openCount(); ; round += 1) {
+  const uncovered = openMutants(ledgerMutants(ctx.runId)).filter((mutant) => mutant.outcome === "no_coverage");
+  if (uncovered.length > 0) {
     ctx.pass += 1;
-    const work = await mutantWork(ctx, openMutants(ledgerMutants(ctx.runId)), new Map());
+    const work = await mutantWork(ctx, uncovered, new Map());
     for (const [file, lines] of refusalWork(ctx)) addLines(work, file, lines);
-    if (work.size === 0) break;
-    const failure = await killRound(ctx, `kill-${round}`, work);
+    const failure = work.size > 0 ? await killRound(ctx, "cover", work) : undefined;
     if (failure) return failure;
-    const after = openCount();
-    if (after >= before) break;
-    before = after;
   }
 
   for (let round = 1, before = openCount(); ; round += 1) {
@@ -1318,7 +1347,12 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
     (selection) => selection.kind === "backend" && selection.inScope.length > 0,
   );
   let started = false;
-  const cancelShutdown = onShutdown(() => harnessStop({ cwd: resolved.root, drainTimeoutMs: 30_000 }));
+  const cancelShutdown = onShutdown(() =>
+    Promise.allSettled([
+      harnessStop({ cwd: resolved.root, drainTimeoutMs: 30_000 }),
+      runEnd({ cwd: ctx.cwd, runId: ctx.runId, exitKind: "BLOCKED", exitReason: "the engine process was stopped" }),
+    ]),
+  );
   if (needsHarness) {
     const booted = await harnessStart({ cwd: resolved.root });
     if (!booted.ok) return close(ctx, { blocker: `The test harness did not start: ${booted.reason}` });
