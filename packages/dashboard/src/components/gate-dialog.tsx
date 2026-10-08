@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { GateText } from "@/components/gate-text";
 import { ToneBadge } from "@/components/state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -170,7 +171,7 @@ export const GateDialog = ({
         <ScrollArea className="min-h-0 flex-1 rounded-md border">
           <div className="grid gap-4 p-4">
             {isPlanGate(item.payload) ? <PlanGateBody payload={item.payload} /> : null}
-            <pre className="font-sans text-sm whitespace-pre-wrap">{item.text}</pre>
+            <GateText text={item.text} />
           </div>
         </ScrollArea>
         {sent ? (
