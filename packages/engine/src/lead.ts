@@ -6,6 +6,7 @@ export const LEAD_DECISIONS = [
   "defer",
   "continue",
   "rerun",
+  "retry",
   "stop",
 ] as const;
 

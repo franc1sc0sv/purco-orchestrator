@@ -154,6 +154,8 @@ export const runVitestSolo = (
         const remainingMs = resolved - (Date.now() - startedAt);
         if (remainingMs <= 0) expire();
         else timer = setTimeout(expire, remainingMs);
+      }, () => {
+        if (!finished) expire();
       });
     }, limitMs);
     const finish = (exitCode: number | null): void => {

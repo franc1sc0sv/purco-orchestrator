@@ -25,6 +25,7 @@ import type {
 export type MutationPassInput = StrykerRunInput & {
   runId: number;
   touchedTestFiles?: readonly string[] | undefined;
+  keepHarness?: boolean | undefined;
   harness?: Omit<HarnessStartInput, "cwd" | "concurrency" | "projectConfigFile"> | undefined;
 };
 
@@ -86,7 +87,7 @@ export const mutationPass = async (
       }),
     );
     if (!started.ok) return fail(`harness: ${started.reason}`);
-    harnessStarted = !started.reused;
+    harnessStarted = !started.reused && input.keepHarness !== true;
   }
 
   const runStages = async (): Promise<MutationPassResult> => {

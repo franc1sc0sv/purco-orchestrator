@@ -849,6 +849,11 @@ export class Store {
             "update runs set status = 'dead', ended_at = ? where run_id = ? and status = 'running'",
           )
           .run(at, held.runId);
+        this.db
+          .prepare(
+            "update steps set status = 'halted', reason = 'the run that owned this step stopped' where run_id = ? and status = 'running'",
+          )
+          .run(held.runId);
       }
       this.db
         .prepare(

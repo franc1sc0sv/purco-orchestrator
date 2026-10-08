@@ -143,6 +143,8 @@ const DASHBOARD_URL = "http://localhost:4317";
 const APPROVE = /^\s*(approve|approved|yes|y|ok|go|continue)\b/i;
 const STOP = /^\s*stop\b/i;
 const RERUN = /^\s*rerun\b\s*(\S+)?/i;
+const RETRY = /^\s*(retry|re-?\s?run)\b/i;
+const CONTINUE = /^\s*continue\b/i;
 
 const tagged = (tag: string, body: string): string =>
   body ? `<${tag}>\n${body}\n</${tag}>` : "";
@@ -174,6 +176,7 @@ export class Orchestrator {
   private readonly workflow: Workflow;
   private readonly attempts = new Map<string, number>();
   private readonly reruns = new Map<Phase, number>();
+  private readonly lastFailures = new Map<Phase, string>();
   private readonly leadBacklog: string[] = [];
   private pools: Map<PgTenant, ReadOnlyPostgres> | undefined;
   private aborted = false;
@@ -1067,7 +1070,7 @@ export class Orchestrator {
         size: this.config.workflow === "ticket" ? this.size : undefined,
         targets: this.config.testTargets,
         focus: step.fix ? `Confirm the fixes for:\n${step.fix}` : this.config.testFocus,
-        fresh: Boolean(step.attempt && step.attempt > 1),
+        fresh: Boolean(step.fix),
         spawn: (job) => this.forgeWorker(job),
         ask: (kind, text, payload) => this.humanRaw(kind, text, undefined, payload),
         decide: (question) => this.leadAnswer(question, ""),
@@ -1077,6 +1080,7 @@ export class Orchestrator {
           fs.appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`);
           this.record(`forge: ${line.slice(0, 300)}`);
         },
+        stopped: () => this.aborted,
       });
     } catch (error) {
       this.record(`test forge failed to run: ${String(error)}`, "escalation");
@@ -1312,21 +1316,30 @@ export class Orchestrator {
     reason: string,
     allowed: LeadDecisionKind[],
   ): Promise<LeadDecision> {
-    const choices = allowed.includes("rerun")
-      ? '"continue", "stop", or "rerun <brief file>"'
-      : '"continue" or "stop"';
-    const answer = await this.humanRaw(
-      "question",
-      `${reason}\n\nStep ${key} needs a decision. Reply ${choices}.`,
-    );
-    if (!answer || STOP.test(answer)) {
-      return { decision: "stop", text: answer ? "the human stopped the run" : `no answer after ${key}` };
+    const replies = [
+      '"continue" (start the next step)',
+      ...(allowed.includes("retry") ? [`"retry" (run ${key} again)`] : []),
+      ...(allowed.includes("rerun") ? ['"rerun <brief file>"'] : []),
+      '"stop"',
+    ];
+    const choices = `one of: ${replies.join(", ")}`;
+    let prompt = `${reason}\n\nStep ${key} needs a decision. Reply ${choices}.`;
+    for (;;) {
+      const answer = await this.humanRaw("question", prompt);
+      if (!answer || STOP.test(answer)) {
+        return { decision: "stop", text: answer ? "the human stopped the run" : `no answer after ${key}` };
+      }
+      const rerun = RERUN.exec(answer);
+      if (rerun && allowed.includes("rerun")) {
+        return { decision: "rerun", text: answer, target: rerun[1] };
+      }
+      if (RETRY.test(answer) && allowed.includes("retry")) {
+        return { decision: "retry", text: answer };
+      }
+      if (CONTINUE.test(answer)) return { decision: "continue", text: answer };
+      this.record(`answer "${answer.slice(0, 200)}" matches no reply for ${key}; asking again`, "escalation");
+      prompt = `The reply "${answer}" is not one the engine can act on, so nothing changed.\n\n${reason}\n\nStep ${key} needs a decision. Reply ${choices}.`;
     }
-    const rerun = RERUN.exec(answer);
-    if (rerun && allowed.includes("rerun")) {
-      return { decision: "rerun", text: answer, target: rerun[1] };
-    }
-    return { decision: "continue", text: answer };
   }
 
   private async afterStep(step: Step, outcome: PhaseOutcome, queue: Step[]): Promise<void> {
@@ -1344,9 +1357,15 @@ export class Orchestrator {
 
     const used = this.reruns.get(step.phase) ?? 0;
     const canRerun = judged && used < this.workflow.maxReruns;
-    const allowed: LeadDecisionKind[] = canRerun
-      ? ["continue", "rerun", "stop"]
-      : ["continue", "stop"];
+    const failedBefore = this.lastFailures.get(step.phase);
+    const canRetry = outcome.status !== "done" && failedBefore !== outcome.summary;
+    if (outcome.status !== "done") this.lastFailures.set(step.phase, outcome.summary);
+    const allowed: LeadDecisionKind[] = [
+      "continue",
+      ...(canRetry ? (["retry"] as const) : []),
+      ...(canRerun ? (["rerun"] as const) : []),
+      "stop",
+    ];
     let decision = await this.leadDecide({
       kind: "step_end",
       allowed,
@@ -1368,6 +1387,12 @@ export class Orchestrator {
 
     if (decision.decision === "stop") {
       this.stop(`stopped after ${key}: ${decision.text}`);
+      return;
+    }
+    if (decision.decision === "retry") {
+      const again: Step = { ...step, attempt: this.nextAttempt(step) };
+      queue.unshift(again);
+      this.record(`retry: ${stepKey(again)}`, "note", { reason: decision.text });
       return;
     }
     if (decision.decision !== "rerun") return;
@@ -1595,7 +1620,7 @@ export class Orchestrator {
       ORCHESTRATOR_LABEL,
       "run",
       "run_end",
-      `run ${this.aborted ? `STOPPED (${this.stopReason})` : "complete"} — $${totalCost.toFixed(4)} across ${this.outcomes.length} steps`,
+      `run ${this.aborted ? `STOPPED (${this.stopReason})` : this.endStatus()} — $${totalCost.toFixed(4)} across ${this.outcomes.length} steps`,
       { outcomes: this.outcomes, stopReason: this.stopReason },
     );
     try {
@@ -1603,11 +1628,11 @@ export class Orchestrator {
     } catch (error) {
       this.record(`could not write report.md: ${String(error)}`);
     }
-    this.store?.endRun(this.aborted ? "stopped" : "complete");
+    this.store?.endRun(this.endStatus());
     if (!this.aborted) {
       this.alerts?.raise(
         "done",
-        `${this.config.ticket} run complete, $${totalCost.toFixed(2)}`,
+        `${this.config.ticket} run ${this.endStatus()}, $${totalCost.toFixed(2)}`,
         { step: "run", title: doneTitle(totalCost), dedupeKey: "run:done" },
       );
     }
@@ -1618,11 +1643,17 @@ export class Orchestrator {
     return this.outcomes;
   }
 
+  private endStatus(): "stopped" | "escalated" | "complete" {
+    if (this.aborted) return "stopped";
+    const last = this.outcomes.at(-1)?.status;
+    return last === "escalated" || last === "failed" ? "escalated" : "complete";
+  }
+
   private writeReport(totalCost: number): void {
     const lines = [
       `# Run report — ${this.config.ticket}`,
       "",
-      `Run ${this.config.runId} · ${this.config.workflow} · $${totalCost.toFixed(4)} · ${this.aborted ? `STOPPED: ${this.stopReason}` : "complete"}`,
+      `Run ${this.config.runId} · ${this.config.workflow} · $${totalCost.toFixed(4)} · ${this.aborted ? `STOPPED: ${this.stopReason}` : this.endStatus()}`,
       "",
       `Size ${this.size ?? "-"} · lead decisions ${this.store?.decisions().length ?? 0} · lead cost $${this.leadCost.toFixed(4)}`,
       "",

@@ -34,8 +34,9 @@ A step finished. The body holds its handoff, its status, and the reports it addr
 
 - `continue`: the next step can start.
 - `rerun`: a judge reported a defect with evidence, and the builder can fix it inside one brief. `target` is that brief's file name, and `text` is what to fix. The engine limits the number of reruns.
+- `retry`: the step did not finish, and running the same step again can finish it. A Test Forge step continues the same run.
 - `stop`: an invariant broke, and later steps would build on a broken tree.
-- `defer`: the human must choose.
+- `defer`: the human must choose. The human can only reply with one of the allowed decisions, so offer only those as options.
 
 ### gate_card
 

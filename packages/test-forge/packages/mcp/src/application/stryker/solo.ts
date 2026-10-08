@@ -180,8 +180,8 @@ export const runSoloJobs = async (
     }
   }
 
-  const reportFileOf = (workdir: string): string =>
-    join(workdir, ...STRYKER_RUN_DIRECTORY.split("/"), "solo", "report.json");
+  const reportFileOf = (workdir: string, name = "report"): string =>
+    join(workdir, ...STRYKER_RUN_DIRECTORY.split("/"), "solo", `${name}.json`);
   const baselines = new Map<string, Promise<number | null>>();
   const db = openDb();
   const results: (SoloMutantResult | undefined)[] = [];
@@ -202,7 +202,7 @@ export const runSoloJobs = async (
         vitestConfigFile: config,
         testFiles: job.testFiles,
         limitMs: BASELINE_CEILING_MS,
-        reportFile: reportFileOf(root),
+        reportFile: reportFileOf(root, `baseline-${laneIndex}`),
         bail: false,
         testNamePattern,
         laneIndex,

@@ -44,7 +44,7 @@ export default defineConfig({
     projects: [
       {
         ...project,
-        test: { ...project.test, include: CONFIG.testFiles, setupFiles },
+        test: { ...project.test, include: CONFIG.testFiles ?? project.test?.include, setupFiles },
       },
     ],
     globalSetup: CONFIG.attach ? [CONFIG.attachSetup] : [],

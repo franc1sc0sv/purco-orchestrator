@@ -25,6 +25,8 @@ const ATTACH_SETUP_FILE = `${STRYKER_DIRECTORY}/attach-setup.ts`;
 
 const WORKER_DB_SETUP_FILE = `${STRYKER_DIRECTORY}/db-per-worker.ts`;
 
+export const ATTACH_CONFIG_FILE = `${STRYKER_DIRECTORY}/vitest.backend.attach.config.mts`;
+
 export const NO_TSCONFIG_FILE = `${SCAFFOLD_DIRECTORY}/no-tsconfig.json`;
 
 const DRY_RUN_TIMEOUT_MINUTES = 20;
@@ -193,7 +195,7 @@ type VitestConfigInput = {
   projectConfigFile: string;
   dbSetupFile: string;
   manifestPath: string;
-  testFiles: readonly string[];
+  testFiles: readonly string[] | null;
 };
 
 const writeVitestConfig = (
@@ -237,6 +239,10 @@ export const writeSoloScaffold = (
   writeVitestConfig(input, vitestConfigFile);
   return { vitestConfigFile };
 };
+
+export const writeAttachScaffold = (
+  input: Omit<VitestConfigInput, "kind" | "testFiles">,
+): void => writeVitestConfig({ ...input, kind: "backend", testFiles: null }, ATTACH_CONFIG_FILE);
 
 export const writeKindScaffold = (input: KindScaffoldInput): KindScaffold => {
   const { worktree, kind } = input;

@@ -14,11 +14,10 @@ import {
   templateCountFor,
 } from "../../domain/stryker/settings.ts";
 import {
+  listContainerIdsPublishing,
   listRunningContainerIds,
-  listSessionContainerIds,
   listTestContainerIds,
   removeContainers,
-  sessionIdPublishing,
 } from "../../infrastructure/docker.ts";
 import {
   processAlive,
@@ -37,6 +36,7 @@ import {
   BOOT_CONFIG_FILE,
   ensureScaffoldIgnored,
   harnessPathsOf,
+  writeAttachScaffold,
   writeHarnessScaffold,
 } from "../../infrastructure/stryker-files.ts";
 import type { HarnessPaths } from "../../infrastructure/stryker-files.ts";
@@ -124,18 +124,26 @@ const logTail = (path: string): string | null => {
 const without = (ids: readonly string[], known: ReadonlySet<string>) =>
   ids.filter((id) => !known.has(id));
 
-const databasePortOf = (manifestPath: string): number | null => {
+const LOCAL_PORT = /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b/g;
+
+const manifestPortsOf = (manifestPath: string): number[] => {
   const text = readTextFile(manifestPath);
-  if (text === null) return null;
+  if (text === null) return [];
   try {
     const manifest: unknown = JSON.parse(text);
-    if (!isRecord(manifest) || !isRecord(manifest["env"])) return null;
-    const url = manifest["env"]["__TEST_DB_URL__"];
-    if (typeof url !== "string") return null;
-    const port = Number(new URL(url).port);
-    return Number.isInteger(port) && port > 0 ? port : null;
+    if (!isRecord(manifest) || !isRecord(manifest["env"])) return [];
+    const values = Object.values(manifest["env"]).filter(
+      (value): value is string => typeof value === "string",
+    );
+    return [
+      ...new Set(
+        values.flatMap((value) =>
+          [...value.matchAll(LOCAL_PORT)].map((match) => Number(match[1])),
+        ),
+      ),
+    ];
   } catch {
-    return null;
+    return [];
   }
 };
 
@@ -144,11 +152,10 @@ const ownContainerIds = async (
   startedDuringBoot: readonly string[],
   path: string | undefined,
 ): Promise<string[]> => {
-  const port = databasePortOf(manifestPath);
-  const session = port === null ? null : await sessionIdPublishing(port, path);
-  return session === null
-    ? [...startedDuringBoot]
-    : listSessionContainerIds(session, path);
+  const publishing = new Set(
+    await listContainerIdsPublishing(manifestPortsOf(manifestPath), path),
+  );
+  return startedDuringBoot.filter((id) => publishing.has(id));
 };
 
 const withDockerPath = async <TResult>(
@@ -164,6 +171,7 @@ export const harnessStart = async ({
   projectConfigFile = DEFAULT_PROJECT_CONFIG_FILE,
   globalSetupFile = DEFAULT_GLOBAL_SETUP_FILE,
   seedDbName = DEFAULT_SEED_DB_NAME,
+  dbSetupFile = DEFAULT_DB_SETUP_FILE,
   bootTimeoutMs = DEFAULT_BOOT_TIMEOUT_MS,
   holdTimeoutMs = DEFAULT_HOLD_TIMEOUT_MS,
   minimumFreeGb,
@@ -284,6 +292,12 @@ export const harnessStart = async ({
     await harnessStop({ cwd: worktree, drainTimeoutMs: 30_000 });
     return { ok: false, reason, bootLogTail };
   }
+  writeAttachScaffold({
+    worktree,
+    projectConfigFile,
+    dbSetupFile,
+    manifestPath: paths.manifestPath,
+  });
   return {
     ok: true,
     reused: false,

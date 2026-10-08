@@ -10,6 +10,17 @@ export type LeaseContext = {
   alive: (pid: number) => boolean;
 };
 
+const shutdownTasks = new Set<() => Promise<unknown>>();
+
+export const onShutdown = (task: () => Promise<unknown>): (() => void) => {
+  shutdownTasks.add(task);
+  return () => shutdownTasks.delete(task);
+};
+
+const exitAfterShutdown = (code: number): void => {
+  void Promise.allSettled([...shutdownTasks].map((task) => task())).finally(() => process.exit(code));
+};
+
 export const pidAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
@@ -61,11 +72,11 @@ export const acquireLease = (store: Store, options: AcquireOptions = {}): HeldLe
   let released = false;
   const onInterrupt = (): void => {
     release();
-    process.exit(130);
+    exitAfterShutdown(130);
   };
   const onTerminate = (): void => {
     release();
-    process.exit(143);
+    exitAfterShutdown(143);
   };
   const release = (): void => {
     if (released) return;

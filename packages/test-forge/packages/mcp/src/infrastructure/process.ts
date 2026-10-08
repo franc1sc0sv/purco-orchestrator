@@ -45,6 +45,20 @@ const environment = (
   extra: Readonly<Record<string, string>> | undefined,
 ): Record<string, string | undefined> => ({ ...process.env, ...extra });
 
+const liveGroups = new Set<number>();
+
+const signalGroup = (pid: number, signal: NodeJS.Signals): void => {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    liveGroups.delete(pid);
+  }
+};
+
+process.on("exit", () => {
+  for (const pid of liveGroups) signalGroup(pid, "SIGKILL");
+});
+
 export const runProcess = ({
   command,
   args = [],
@@ -61,7 +75,10 @@ export const runProcess = ({
       cwd,
       shell,
       env: environment(env),
+      detached: true,
     });
+    const group = child.pid;
+    if (group !== undefined) liveGroups.add(group);
 
     let stdout = "";
     let stderr = "";
@@ -87,8 +104,9 @@ export const runProcess = ({
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
+      if (group === undefined) return;
+      signalGroup(group, "SIGTERM");
+      killTimer = setTimeout(() => signalGroup(group, "SIGKILL"), SIGKILL_GRACE_MS);
     }, limit);
 
     const finish = (
@@ -98,6 +116,7 @@ export const runProcess = ({
     ): void => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      if (group !== undefined) liveGroups.delete(group);
       settle({
         command,
         cwd,

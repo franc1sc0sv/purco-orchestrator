@@ -4,8 +4,6 @@ const DOCKER_TIMEOUT_MS = 60_000;
 
 const TESTCONTAINERS_LABEL = "label=org.testcontainers=true";
 
-const SESSION_LABEL = "org.testcontainers.session-id";
-
 const dockerOutput = async (
   args: readonly string[],
   path: string | undefined,
@@ -47,38 +45,17 @@ export const removeContainers = async (
   });
 };
 
-export const sessionIdPublishing = async (
-  hostPort: number,
+export const listContainerIdsPublishing = async (
+  hostPorts: readonly number[],
   path: string | undefined,
-): Promise<string | null> => {
-  const [container] = await dockerOutput(
-    ["ps", "--quiet", "--no-trunc", "--filter", `publish=${hostPort}`],
-    path,
+): Promise<string[]> => {
+  const lists = await Promise.all(
+    hostPorts.map((port) =>
+      dockerOutput(
+        ["ps", "--quiet", "--no-trunc", "--filter", `publish=${port}`],
+        path,
+      ),
+    ),
   );
-  if (container === undefined) return null;
-  const [session] = await dockerOutput(
-    [
-      "inspect",
-      "--format",
-      `{{ index .Config.Labels "${SESSION_LABEL}" }}`,
-      container,
-    ],
-    path,
-  );
-  return session === undefined || session === "" ? null : session;
+  return [...new Set(lists.flat())];
 };
-
-export const listSessionContainerIds = (
-  sessionId: string,
-  path: string | undefined,
-): Promise<string[]> =>
-  dockerOutput(
-    [
-      "ps",
-      "--quiet",
-      "--no-trunc",
-      "--filter",
-      `label=${SESSION_LABEL}=${sessionId}`,
-    ],
-    path,
-  );

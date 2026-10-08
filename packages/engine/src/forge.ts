@@ -23,8 +23,10 @@ import { unitUpsertBatch } from "test-forge-mcp-server/src/application/ledger/un
 import { verdictRecordBatch } from "test-forge-mcp-server/src/application/ledger/verdict-record-batch.ts";
 import { waiverRecordBatch } from "test-forge-mcp-server/src/application/ledger/waiver-record-batch.ts";
 import { mutationEquivalenceRecord } from "test-forge-mcp-server/src/application/mutation/equivalence-record.ts";
+import { onShutdown } from "./lease.ts";
 import { harnessStart, harnessStop } from "test-forge-mcp-server/src/application/stryker/harness.ts";
 import { mutationPass } from "test-forge-mcp-server/src/application/stryker/mutation-pass.ts";
+import { ATTACH_CONFIG_FILE } from "test-forge-mcp-server/src/infrastructure/stryker-files.ts";
 import type { TestedMutant } from "test-forge-mcp-server/src/application/stryker/run.ts";
 import { resolveScope } from "test-forge-mcp-server/src/application/stryker/scope.ts";
 import { projectKindOf } from "test-forge-mcp-server/src/domain/stryker/scope.ts";
@@ -124,6 +126,7 @@ export type ForgeHost = {
   decide: (question: string) => Promise<string>;
   event: (kind: "mutant_plan" | "mutant", text: string, data: Record<string, unknown>) => void;
   log: (line: string) => void;
+  stopped: () => boolean;
 };
 
 export type ForgeResult = {
@@ -229,6 +232,8 @@ const commandsFor = (scope: ForgeScope): GateCommands => ({
   typecheck: "NODE_OPTIONS='--max-old-space-size=10240' yarn tsc",
   lint: "yarn lint",
 });
+
+const ATTACHED_BACKEND_TEST = `NODE_OPTIONS='--max-old-space-size=8192' yarn vitest run --config ${ATTACH_CONFIG_FILE}`;
 
 const unitsFile = (ctx: Ctx): string => path.join(ctx.dir, "units.json");
 const baselineFile = (ctx: Ctx): string => path.join(ctx.dir, "harden-baseline.json");
@@ -774,6 +779,7 @@ const passTestFiles = (ctx: Ctx, touched: readonly string[] | undefined): string
     .sort();
 
 const runPass = async (ctx: Ctx, label: string, touched?: readonly string[]): Promise<string | undefined> => {
+  if (ctx.host.stopped()) return "The run was stopped.";
   const result: MutationPassResult = await mutationPass({
     cwd: ctx.cwd,
     base: ctx.host.base,
@@ -781,6 +787,7 @@ const runPass = async (ctx: Ctx, label: string, touched?: readonly string[]): Pr
     files: changedProductionFiles(ctx.cwd, ctx.host.base).filter((file) => projectKindOf(file) === ctx.scope),
     testFiles: passTestFiles(ctx, touched),
     label: `${ctx.runId}-${label}`,
+    keepHarness: true,
     ...(touched ? { touchedTestFiles: touched } : {}),
     onPlanned: () => publishPlan(ctx, ledgerMutants(ctx.runId)),
     onMutantTested: (tested) => publishTested(ctx, tested),
@@ -931,6 +938,7 @@ const killRound = async (
   label: string,
   work: Map<string, string[]>,
 ): Promise<string | undefined> => {
+  if (ctx.host.stopped()) return "The run was stopped.";
   await write(ctx, work, label);
   const lost = await restoreProtected(ctx);
   if (lost) return lost;
@@ -1266,10 +1274,12 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
     (selection) => selection.kind === "backend" && selection.inScope.length > 0,
   );
   let started = false;
+  const cancelShutdown = onShutdown(() => harnessStop({ cwd: resolved.root, drainTimeoutMs: 30_000 }));
   if (needsHarness) {
     const booted = await harnessStart({ cwd: resolved.root });
     if (!booted.ok) return close(ctx, { blocker: `The test harness did not start: ${booted.reason}` });
     started = !booted.reused;
+    ctx.commands = { ...ctx.commands, test: ATTACHED_BACKEND_TEST };
   }
   try {
     const blocker = await mutationStage(ctx);
@@ -1277,6 +1287,7 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
     const gates = await finish(ctx);
     return close(ctx, { blocker: finalBlocker(ctx), gates });
   } finally {
+    cancelShutdown();
     if (started) await harnessStop({ cwd: resolved.root });
   }
 };
