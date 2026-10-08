@@ -26,7 +26,7 @@ const OUTCOME_BY_STATUS: Readonly<Record<string, MutantOutcome>> = {
   Killed: "killed",
   Survived: "survived",
   NoCoverage: "no_coverage",
-  Timeout: "timeout_pending",
+  Timeout: "killed_by_timeout",
   CompileError: "unviable",
   RuntimeError: "error",
   Ignored: "unviable",

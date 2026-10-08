@@ -187,9 +187,6 @@ const isWaiverRequest = (request: Request): request is Request & { kind: WaiverK
   WAIVER_KINDS.some((kind) => kind === request.kind);
 
 const CONCURRENCY = 3;
-const MAX_ROUNDS = 4;
-const MAX_MUTATION_ROUNDS = 2;
-const MAX_POLISH_ROUNDS = 2;
 const USER = "user";
 const RULES_LIMIT = 40_000;
 const LIST_LIMIT = 12;
@@ -238,6 +235,7 @@ const ATTACHED_BACKEND_TEST = `NODE_OPTIONS='--max-old-space-size=8192' yarn vit
 const unitsFile = (ctx: Ctx): string => path.join(ctx.dir, "units.json");
 const baselineFile = (ctx: Ctx): string => path.join(ctx.dir, "harden-baseline.json");
 const eligibleFile = (ctx: Ctx): string => path.join(ctx.dir, "eligible-mutants.json");
+const baselineDigestFile = (ctx: Ctx): string => path.join(ctx.dir, "baseline-digest.txt");
 const proofsFile = (ctx: Ctx): string => path.join(ctx.dir, "kill-proofs.json");
 const reportFile = (ctx: Ctx): string => path.join(ctx.dir, "mutation-report.md");
 const requestsFile = (ctx: Ctx, file: string): string =>
@@ -773,22 +771,21 @@ const countsText = (rows: readonly LedgerMutant[]): string => {
   return [...counts.entries()].map(([outcome, count]) => `${outcome} ${count}`).join(", ");
 };
 
-const passTestFiles = (ctx: Ctx, touched: readonly string[] | undefined): string[] =>
-  [...new Set([...ctx.units.map((unit) => unit.file), ...(touched ?? [])])]
+const passTestFiles = (ctx: Ctx): string[] =>
+  [...new Set(ctx.units.map((unit) => unit.file))]
     .filter((file) => fs.existsSync(path.join(ctx.cwd, file)))
     .sort();
 
-const runPass = async (ctx: Ctx, label: string, touched?: readonly string[]): Promise<string | undefined> => {
+const runPass = async (ctx: Ctx, label: string): Promise<string | undefined> => {
   if (ctx.host.stopped()) return "The run was stopped.";
   const result: MutationPassResult = await mutationPass({
     cwd: ctx.cwd,
     base: ctx.host.base,
     runId: ctx.runId,
     files: changedProductionFiles(ctx.cwd, ctx.host.base).filter((file) => projectKindOf(file) === ctx.scope),
-    testFiles: passTestFiles(ctx, touched),
+    testFiles: passTestFiles(ctx),
     label: `${ctx.runId}-${label}`,
     keepHarness: true,
-    ...(touched ? { touchedTestFiles: touched } : {}),
     onPlanned: () => publishPlan(ctx, ledgerMutants(ctx.runId)),
     onMutantTested: (tested) => publishTested(ctx, tested),
   });
@@ -798,6 +795,37 @@ const runPass = async (ctx: Ctx, label: string, touched?: readonly string[]): Pr
     `mutation ${label}: ${result.reconciliation.inScopeInLedger} in scope, ${countsText(ledgerMutants(ctx.runId))}, ${Math.round(result.totalMs / 1000)} s`,
   );
   return undefined;
+};
+
+const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]): Promise<string | undefined> => {
+  if (ctx.host.stopped()) return "The run was stopped.";
+  const open = new Set(openMutants(ledgerMutants(ctx.runId)).map((mutant) => mutant.id));
+  const jobs = strykerRowsOf(openDb(), ctx.runId)
+    .filter((row) => open.has(row.id))
+    .map((row) => {
+      const job = jobOf(row);
+      const added = touched.filter((file) => projectKindOf(file) === job.kind);
+      return { ...job, row: { ...row, coveredBy: [] }, testFiles: [...new Set([...job.testFiles, ...added])].sort() };
+    })
+    .filter((job) => job.testFiles.length > 0);
+  if (jobs.length === 0) return undefined;
+  const startedAt = Date.now();
+  const batch = await runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, jobs);
+  if (!batch.ok) return `The re-check ${label} failed: ${batch.reason}`;
+  publish(ctx);
+  ctx.host.log(
+    `re-check ${label}: ${jobs.length} open mutant(s), ${countsText(ledgerMutants(ctx.runId))}, ${Math.round((Date.now() - startedAt) / 1000)} s`,
+  );
+  return undefined;
+};
+
+const productionDigest = (ctx: Ctx): string => {
+  const read = readWorktreeFile(ctx);
+  return digest(
+    changedProductionFiles(ctx.cwd, ctx.host.base)
+      .map((file) => `${file}\n${read(file)}`)
+      .join("\n"),
+  );
 };
 
 const writeProofs = (ctx: Ctx): void => {
@@ -943,7 +971,7 @@ const killRound = async (
   const lost = await restoreProtected(ctx);
   if (lost) return lost;
   const files = [...work.keys()];
-  const failure = await runPass(ctx, label, files);
+  const failure = await recheckOpen(ctx, label, files);
   if (failure) return failure;
   await gate(ctx, files);
   return undefined;
@@ -1045,8 +1073,16 @@ const signEquivalences = async (ctx: Ctx): Promise<void> => {
 };
 
 const mutationStage = async (ctx: Ctx): Promise<string | undefined> => {
-  const baseline = await runPass(ctx, "baseline");
-  if (baseline) return baseline;
+  const current = productionDigest(ctx);
+  const reusable =
+    ledgerMutants(ctx.runId).length > 0 &&
+    fs.existsSync(baselineDigestFile(ctx)) &&
+    fs.readFileSync(baselineDigestFile(ctx), "utf8") === current;
+  if (!reusable) {
+    const baseline = await runPass(ctx, "baseline");
+    if (baseline) return baseline;
+    fs.writeFileSync(baselineDigestFile(ctx), current);
+  }
   const first = ledgerMutants(ctx.runId);
   if (first.length === 0) return "No mutant could be generated on the changed lines.";
   ctx.eligible = fs.existsSync(eligibleFile(ctx))
@@ -1055,23 +1091,30 @@ const mutationStage = async (ctx: Ctx): Promise<string | undefined> => {
   fs.writeFileSync(eligibleFile(ctx), JSON.stringify({ ids: [...ctx.eligible] }));
   ctx.host.log(`mutation baseline: ${first.length} in scope, ${ctx.eligible.size} open`);
 
-  for (let round = 1; round <= MAX_ROUNDS; round += 1) {
-    ctx.pass = round;
-    const open = openMutants(ledgerMutants(ctx.runId));
-    const work = await mutantWork(ctx, open, new Map());
+  const openCount = (): number => openMutants(ledgerMutants(ctx.runId)).length;
+
+  for (let round = 1, before = openCount(); ; round += 1) {
+    ctx.pass += 1;
+    const work = await mutantWork(ctx, openMutants(ledgerMutants(ctx.runId)), new Map());
     for (const [file, lines] of refusalWork(ctx)) addLines(work, file, lines);
     if (work.size === 0) break;
     const failure = await killRound(ctx, `kill-${round}`, work);
     if (failure) return failure;
+    const after = openCount();
+    if (after >= before) break;
+    before = after;
   }
 
-  for (let round = 1; round <= MAX_MUTATION_ROUNDS; round += 1) {
-    ctx.pass = MAX_ROUNDS + round;
+  for (let round = 1, before = openCount(); ; round += 1) {
+    ctx.pass += 1;
     const work = await huntSurvivors(ctx, round);
     for (const [file, lines] of refusalWork(ctx)) addLines(work, file, lines);
     if (work.size === 0) break;
     const failure = await killRound(ctx, `hole-${round}`, work);
     if (failure) return failure;
+    const after = openCount();
+    if (after >= before) break;
+    before = after;
   }
   await signEquivalences(ctx);
   return undefined;
@@ -1100,7 +1143,8 @@ const restoreProtected = async (ctx: Ctx): Promise<string | undefined> => {
 const finish = async (ctx: Ctx): Promise<GatesEvaluation | undefined> => {
   const read = readWorktreeFile(ctx);
   let gates: GatesEvaluation | undefined;
-  for (let attempt = 1; attempt <= MAX_POLISH_ROUNDS; attempt += 1) {
+  let previousWork = Number.POSITIVE_INFINITY;
+  for (let attempt = 1; ; attempt += 1) {
     const changed = changedTestFiles(ctx.baseline, read);
     if (changed.length === 0) return gates;
     mergeUnits(ctx, changed.map((file) => ({ file, sources: [], rows: [], focusLines: [] })));
@@ -1125,12 +1169,12 @@ const finish = async (ctx: Ctx): Promise<GatesEvaluation | undefined> => {
     gates = await evaluate(ctx, false);
     const pending = gates.workList.filter((item) => FIXABLE.includes(item.predicate));
     const work = routeWork(ctx.units, pending, ctx.ruledTests).byFile;
-    if (work.size === 0 || attempt === MAX_POLISH_ROUNDS) return gates;
-    ctx.pass = MAX_ROUNDS + MAX_MUTATION_ROUNDS + attempt;
+    if (work.size === 0 || work.size >= previousWork) return gates;
+    previousWork = work.size;
+    ctx.pass += 1;
     ctx.failure = await killRound(ctx, `polish-${attempt}`, work);
     if (ctx.failure) return gates;
   }
-  return gates;
 };
 
 const strykerVersion = (): string => {

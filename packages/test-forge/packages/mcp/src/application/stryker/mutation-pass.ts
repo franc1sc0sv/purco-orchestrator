@@ -7,14 +7,12 @@ import {
 } from "../../infrastructure/db/stryker-store.ts";
 import { EXTRA_MUTATORS } from "test-forge-contracts/stryker";
 import { recoverBackups } from "../../infrastructure/solo-backup.ts";
-import { removeSoloLanes, soloLanePoolOf } from "../../infrastructure/solo-lanes.ts";
+import { removeSoloLanes } from "../../infrastructure/solo-lanes.ts";
 import { harnessStart, harnessStop } from "./harness.ts";
 import type { HarnessStartInput } from "./harness.ts";
-import { extraOperators } from "./extra-operators.ts";
 import { strykerRun } from "./run.ts";
 import type { StrykerRunInput } from "./run.ts";
 import { resolveScope } from "./scope.ts";
-import { timeoutRecheck } from "./solo.ts";
 import { repoRoot } from "../../infrastructure/git.ts";
 import type {
   MutationPassResult,
@@ -69,7 +67,6 @@ export const mutationPass = async (
   const root = await repoRoot(input.cwd);
   recoverBackups(root);
   removeSoloLanes(root);
-  const lanes = soloLanePoolOf(root);
   const scope = await timed("scope", () => resolveScope(input));
   if (!scope.ok) return fail(scope.reason);
   const needsHarness = scope.selections.some(
@@ -122,14 +119,6 @@ export const mutationPass = async (
         }
       }
     }
-    const extras = await timed("extraOperators", () =>
-      extraOperators({ ...input, cwd: root, lanes }),
-    );
-    if (!extras.ok) return fail(`extra operators: ${extras.reason}`);
-    const recheck = await timed("timeoutRecheck", () =>
-      timeoutRecheck({ ...input, cwd: root, lanes }),
-    );
-    if (!recheck.ok) return fail(`timeout re-check: ${recheck.reason}`);
     const ledger = strykerRowsOf(openDb(), input.runId).map((row) => ({
       mutantId: row.id,
       file: row.site.file,
@@ -164,8 +153,6 @@ export const mutationPass = async (
       testFiles,
       counts: reconciliation.finalStates,
       stryker,
-      extras,
-      timeoutRecheck: recheck,
       reconciliation,
       stages,
       totalMs: 0,
@@ -175,8 +162,7 @@ export const mutationPass = async (
   const result = await runStages()
     .catch((error: unknown) =>
       fail(error instanceof Error ? error.message : String(error)),
-    )
-    .finally(() => lanes.dispose());
+    );
   const stopped = harnessStarted
     ? await timed("harnessStop", () => harnessStop({ cwd: root }))
     : null;

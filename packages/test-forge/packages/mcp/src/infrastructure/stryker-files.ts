@@ -33,6 +33,8 @@ const DRY_RUN_TIMEOUT_MINUTES = 20;
 
 const PHASE_REPORTER_FILE = `${STRYKER_DIRECTORY}/phase-reporter.mjs`;
 
+const MESSAGE_IGNORER_FILE = `${STRYKER_DIRECTORY}/message-ignorer.mjs`;
+
 const toPosix = (path: string): string => path.split(sep).join("/");
 
 const specifierFrom = (fromDirectory: string, target: string): string => {
@@ -257,6 +259,13 @@ export const writeKindScaffold = (input: KindScaffoldInput): KindScaffold => {
       __STRYKER_API_PLUGIN__: strykerApiPlugin,
     }),
   );
+  const ignorerPath = write(
+    worktree,
+    MESSAGE_IGNORER_FILE,
+    filled("message-ignorer.mjs.tpl", {
+      __STRYKER_API_PLUGIN__: strykerApiPlugin,
+    }),
+  );
   const reportPath = paths.reportPath(input.runId);
   const eventsPath = paths.eventsPath(input.runId);
   mkdirSync(paths.directory, { recursive: true });
@@ -265,7 +274,8 @@ export const writeKindScaffold = (input: KindScaffoldInput): KindScaffold => {
     json({
       testRunner: "vitest",
       vitest: { configFile: vitestConfigFile },
-      plugins: ["@stryker-mutator/vitest-runner", reporterPath],
+      plugins: ["@stryker-mutator/vitest-runner", reporterPath, ignorerPath],
+      ignorers: ["forge-messages"],
       coverageAnalysis: "perTest",
       mutate: input.mutate,
       ignoreStatic: false,

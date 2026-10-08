@@ -219,8 +219,6 @@ export type MutationPassResult =
       testFiles: Record<ProjectKind, string[]>;
       counts: StrykerCounts;
       stryker: Extract<StrykerRunResult, { ok: true }>;
-      extras: Extract<ExtraOperatorsResult, { ok: true }>;
-      timeoutRecheck: Extract<TimeoutRecheckResult, { ok: true }>;
       reconciliation: Reconciliation;
       stages: MutationPassStage[];
       totalMs: number;

@@ -359,7 +359,7 @@ export const registerStrykerTools = (server: McpServer): void => {
       description: [
         "One call for the mutation phase of a ticket: restores any leftover solo backup, resolves the scope, starts the backend harness (only when backend mutants are in scope), runs Stryker, runs the extra operators, re-checks every timeout alone, stops the harness it started, and reconciles.",
         "",
-        "Returns: { ok: true, runId, scopeRule, harnessStarted, harnessStopped, testFiles, counts, stryker, extras, timeoutRecheck, reconciliation, stages, totalMs } or { ok: false, reason, stages }. reconciliation has changedFiles, changedLines, inScopeStryker, inScopeExtra, inScopeExpected, inScopeInLedger, finalStates, withoutFinalState (must be empty) and consistent. Blocks for the whole pass (many minutes); the engine should call mutationPass in process.",
+        "Returns: { ok: true, runId, scopeRule, harnessStarted, harnessStopped, testFiles, counts, stryker, reconciliation, stages, totalMs } or { ok: false, reason, stages }. reconciliation has changedFiles, changedLines, inScopeStryker, inScopeExtra, inScopeExpected, inScopeInLedger, finalStates, withoutFinalState (must be empty) and consistent. Blocks for the whole pass (many minutes); the engine should call mutationPass in process.",
       ].join("\n"),
       inputSchema: mutationPassInput.shape,
       annotations: {
