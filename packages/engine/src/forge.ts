@@ -63,6 +63,7 @@ import {
   protectedTestsOf,
   removedProtectedTests,
   removeTests,
+  testNames,
   testOutline,
   type ExitDecision,
   type TestBaseline,
@@ -686,22 +687,30 @@ const recordMechanical = async (
 };
 
 const inspect = async (ctx: Ctx, files: readonly string[], label: string): Promise<void> => {
+  const read = readWorktreeFile(ctx);
   await inBatches(files, async (file) => {
     const found = await rulesFor({ cwd: ctx.cwd, scope: ctx.scope, filePath: file });
-    const rules = ctx.host.size === "S" ? await inspectMechanically(ctx, file, found.rules) : found.rules;
+    const rules = await inspectMechanically(ctx, file, found.rules);
     const ids = rules.map((rule) => rule.id);
     if (ids.length === 0) return;
+    const content = read(file);
+    const known = new Set(protectedTestsOf(ctx.baseline, file));
+    const fresh = testNames(content).filter((name) => !known.has(name));
+    if (fresh.length === 0) return;
     await ctx.host.spawn({
       role: "inspector",
       name: `${label}:${path.basename(file)}`,
       task: [
-        `Judge ${file} against each rule below.`,
+        `Judge the new tests of ${file} against each rule below.`,
         "",
         engagement(ctx, [`- the file: ${file}`, `- the rules: ${ids.join(", ")}`]),
       ].join("\n"),
+      parts: [
+        tagged("new_tests", fresh.map((name) => `- ${name}`).join("\n")),
+        tagged("test_outline", testOutline(content)),
+      ],
     });
   });
-  const read = readWorktreeFile(ctx);
   for (const file of files) ctx.inspected.set(file, digest(read(file)));
   await unitUpsertBatch({
     cwd: ctx.cwd,
