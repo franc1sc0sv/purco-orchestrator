@@ -245,6 +245,9 @@ export type ForgeJob = {
   kind: string;
   label: string;
   detail: string;
+  command?: string;
+  mutantIds?: number[];
+  testFiles?: string[];
   state: "running" | "done" | "failed";
   workers: number;
   startedAt: string;
@@ -372,8 +375,15 @@ export type LimitWindow = {
 
 export type ModelLimit = LimitWindow & { model: string };
 
+export type SessionTrend = {
+  pctPerHour: number;
+  projectedPct: number;
+  runsOutAt?: number;
+};
+
 export type PlanLimits = {
   session?: LimitWindow;
+  sessionTrend?: SessionTrend;
   weekly?: LimitWindow;
   weeklyByModel: ModelLimit[];
   installCommand: string;

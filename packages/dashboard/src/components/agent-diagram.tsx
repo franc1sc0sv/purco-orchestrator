@@ -32,7 +32,14 @@ type LeadData = { tone: Tone; busy: boolean };
 type StageData = { label: string; tone: Tone; busy: boolean };
 type WorkerData = { worker: Worker; busy: boolean; ended: boolean; chip: string | undefined; selected: boolean };
 
-type JobData = { job: ForgeJob; tone: Tone; busy: boolean; elapsedMs: number; progress: string | undefined };
+type JobData = {
+  job: ForgeJob;
+  tone: Tone;
+  busy: boolean;
+  elapsedMs: number;
+  progress: string | undefined;
+  selected: boolean;
+};
 
 type LeadNode = Node<LeadData, "lead">;
 type JobNode = Node<JobData, "job">;
@@ -140,11 +147,12 @@ const JobView = ({ data }: NodeProps<JobNode>) => {
   return (
     <Card
       className={cn(
-        "w-52 gap-1 border-2 border-dashed p-2.5 text-xs transition-opacity duration-1000",
+        "w-52 cursor-pointer gap-1 border-2 border-dashed p-2.5 text-xs transition-opacity duration-1000",
         TONES[data.tone].vars,
         TONES[data.tone].node,
         data.busy && "animate-node-glow",
-        !data.busy && "opacity-40",
+        !data.busy && !data.selected && "opacity-40",
+        data.selected && "ring-primary ring-2 ring-offset-2 ring-offset-background",
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -218,7 +226,7 @@ const buildGraph = (
   alive: boolean,
   stuck: boolean,
   view: { chips: Map<string, string>; selectedId: string | undefined },
-  forge: { jobs: ForgeJob[]; progress: string | undefined; now: number },
+  forge: { jobs: ForgeJob[]; progressOf: (job: ForgeJob) => string | undefined; now: number },
 ): { nodes: Node[]; edges: Edge[]; height: number } => {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -317,7 +325,8 @@ const buildGraph = (
           tone,
           busy,
           elapsedMs: (job.endedAt ? Date.parse(job.endedAt) : forge.now) - Date.parse(job.startedAt),
-          progress: busy && (job.kind === "stryker" || job.kind === "recheck") ? forge.progress : undefined,
+          progress: forge.progressOf(job),
+          selected: view.selectedId === `job:${job.id}`,
         },
         draggable: false,
       } satisfies JobNode);
@@ -347,7 +356,7 @@ export const AgentDiagram = ({
   stuck,
   events,
   jobs,
-  progress,
+  progressOf,
   now,
   selectedId,
   onSelect,
@@ -359,7 +368,7 @@ export const AgentDiagram = ({
   stuck: boolean;
   events: StreamEvent[];
   jobs: ForgeJob[];
-  progress: string | undefined;
+  progressOf: (job: ForgeJob) => string | undefined;
   now: number;
   selectedId: string | undefined;
   onSelect: (workerId: string) => void;
@@ -376,8 +385,8 @@ export const AgentDiagram = ({
   }, [workers, liveWorkerIds, events]);
   const graph = useMemo(
     () =>
-      buildGraph(workers, new Set(liveWorkerIds), pipeline, alive, stuck, { chips, selectedId }, { jobs, progress, now }),
-    [workers, liveWorkerIds, pipeline, alive, stuck, chips, selectedId, jobs, progress, now],
+      buildGraph(workers, new Set(liveWorkerIds), pipeline, alive, stuck, { chips, selectedId }, { jobs, progressOf, now }),
+    [workers, liveWorkerIds, pipeline, alive, stuck, chips, selectedId, jobs, progressOf, now],
   );
   const structure = graph.nodes.map((node) => node.id).join("|");
   return (
@@ -389,6 +398,7 @@ export const AgentDiagram = ({
         nodeTypes={nodeTypes}
         onNodeClick={(_, node) => {
           if (node.type === "worker") onSelect(node.id.replace(/^worker:/, ""));
+          if (node.type === "job") onSelect(node.id);
         }}
         fitView
         fitViewOptions={{ padding: FIT_PADDING }}

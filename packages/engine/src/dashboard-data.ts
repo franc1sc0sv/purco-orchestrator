@@ -124,6 +124,9 @@ export type ForgeJobView = {
   kind: string;
   label: string;
   detail: string;
+  command?: string;
+  mutantIds?: number[];
+  testFiles?: string[];
   state: "running" | "done" | "failed";
   workers: number;
   startedAt: string;

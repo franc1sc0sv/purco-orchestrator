@@ -3,7 +3,8 @@ import { AgentPanel } from "@/components/agent-panel";
 import { AlertList } from "@/components/alert-list";
 import { AnswerNeeded } from "@/components/answer-needed";
 import { FailedSteps, failedStepsOf } from "@/components/failed-steps";
-import { ForgeActivity, forgeProgress, isTesting } from "@/components/forge-activity";
+import { ForgeActivity, isTesting } from "@/components/forge-activity";
+import { JobPanel, jobProgress } from "@/components/job-panel";
 import { GatePanel } from "@/components/gate-panel";
 import { Panel } from "@/components/panel";
 import { PanelSkeleton } from "@/components/screen-skeleton";
@@ -45,6 +46,8 @@ export const LiveTab = ({
   const item = items[0];
   const failedSteps = summary.state === "failed" && !item ? failedStepsOf(detail.pipeline) : [];
   const selected = detail.workers.find((worker) => worker.id === agentId);
+  const selectedJob = detail.tests.jobs.find((job) => `job:${job.id}` === agentId);
+  const alive = summary.activeRun !== null;
   const ticketId = summary.ticket;
   const replayAt = replay === null ? null : replayTimeOf(new URLSearchParams({ t: replay }));
   const keep: Record<string, string> = replay === null ? {} : { t: replay };
@@ -78,16 +81,24 @@ export const LiveTab = ({
               stuck={summary.state === "stuck"}
               events={detail.events}
               jobs={detail.tests.jobs}
-              progress={forgeProgress(detail.tests)}
+              progressOf={(job) => jobProgress(job, detail.tests, alive)}
               now={clockNow}
-              selectedId={selected?.id}
+              selectedId={selected?.id ?? (selectedJob ? `job:${selectedJob.id}` : undefined)}
               onSelect={(workerId) => {
                 window.location.hash = ticketHref(ticketId, "live", { ...keep, agent: workerId });
               }}
             />
           </Suspense>
         </Panel>
-        {selected ? (
+        {selectedJob ? (
+          <JobPanel
+            job={selectedJob}
+            tests={detail.tests}
+            alive={alive}
+            now={clockNow}
+            closeHref={ticketHref(ticketId, "live", keep)}
+          />
+        ) : selected ? (
           <AgentPanel
             worker={selected}
             events={eventsOfWorker(detail.events, selected)}

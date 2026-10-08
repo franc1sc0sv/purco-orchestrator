@@ -290,7 +290,7 @@ let jobCount = 0;
 
 const tracked = async <T>(
   ctx: Ctx,
-  job: { kind: JobKind; label: string; detail: string },
+  job: { kind: JobKind; label: string; detail: string; command: string; mutantIds?: number[]; testFiles?: string[] },
   work: () => Promise<T>,
 ): Promise<T> => {
   jobCount += 1;
@@ -328,7 +328,12 @@ const tracked = async <T>(
 const evaluate = async (ctx: Ctx, run: boolean): Promise<GatesEvaluation> => {
   const gates = await tracked(
     ctx,
-    { kind: "gates", label: "Gates", detail: run ? "test suite and flake probe" : "ledger check" },
+    {
+      kind: "gates",
+      label: "Gates",
+      detail: run ? "test suite and flake probe" : "ledger check",
+      command: run ? `${ctx.commands.test} and a flake probe` : "predicates from the ledger",
+    },
     () =>
       evaluateGates({
         cwd: ctx.cwd,
@@ -849,7 +854,13 @@ const runPass = async (ctx: Ctx, label: string): Promise<string | undefined> => 
   const testFiles = passTestFiles(ctx);
   const result: MutationPassResult = await tracked(
     ctx,
-    { kind: "stryker", label: `Stryker ${label}`, detail: `${files.length} source files, ${testFiles.length} test files` },
+    {
+      kind: "stryker",
+      label: `Stryker ${label}`,
+      detail: `${files.length} source files, ${testFiles.length} test files`,
+      command: "Stryker with the vitest runner and perTest coverage on the changed lines",
+      testFiles,
+    },
     () =>
       mutationPass({
         cwd: ctx.cwd,
@@ -892,7 +903,14 @@ const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]):
   const startedAt = Date.now();
   const batch = await tracked(
     ctx,
-    { kind: "recheck", label: `Re-check ${label}`, detail: `${jobs.length} open mutants` },
+    {
+      kind: "recheck",
+      label: `Re-check ${label}`,
+      detail: `${jobs.length} open mutants`,
+      command: "solo runner: each mutant alone in a lane, only its test files",
+      mutantIds: jobs.map((job) => job.row.id),
+      testFiles: [...new Set(jobs.flatMap((job) => job.testFiles))].sort(),
+    },
     () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, jobs),
   );
   if (!batch.ok) return `The re-check ${label} failed: ${batch.reason}`;
@@ -909,7 +927,13 @@ const failingTestWork = async (ctx: Ctx): Promise<Map<string, string[]>> => {
   const files = passTestFiles(ctx);
   const run = await tracked(
     ctx,
-    { kind: "suite", label: "Test suite", detail: `${files.length} test files on unchanged code` },
+    {
+      kind: "suite",
+      label: "Test suite",
+      detail: `${files.length} test files on unchanged code`,
+      command: ctx.commands.test,
+      testFiles: files,
+    },
     () => execSuite({ cwd: ctx.cwd, command: ctx.commands.test, files }),
   );
   const work = new Map<string, string[]>();
@@ -974,7 +998,14 @@ const soloVerify = async (
   if (jobs.length === 0) return verified;
   const batch = await tracked(
     ctx,
-    { kind: "solo", label: "Kill check", detail: `${jobs.length} mutants against the new tests` },
+    {
+      kind: "solo",
+      label: "Kill check",
+      detail: `${jobs.length} mutants against the new tests`,
+      command: "solo runner: each mutant alone, only the new test",
+      mutantIds: jobs.map(({ id }) => id),
+      testFiles: [...new Set(jobs.flatMap(({ job }) => job.testFiles))].sort(),
+    },
     () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId, record: false }, jobs.map(({ job }) => job)),
   );
   if (!batch.ok) {
@@ -1455,7 +1486,12 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
   if (needsHarness) {
     const booted = await tracked(
       ctx,
-      { kind: "harness", label: "Test harness", detail: "test containers, migrations and seed templates" },
+      {
+        kind: "harness",
+        label: "Test harness",
+        detail: "test containers, migrations and seed templates",
+        command: "vitest global setup in a hold process: postgres, maildev, stripe-mock, localstack, fake-gcs",
+      },
       () => harnessStart({ cwd: resolved.root }),
     );
     if (!booted.ok) return close(ctx, { blocker: `The test harness did not start: ${booted.reason}` });
