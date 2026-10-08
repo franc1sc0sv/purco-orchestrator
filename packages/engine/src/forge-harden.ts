@@ -65,6 +65,61 @@ export const testNames = (content: string): string[] => [
   ...new Set([...content.matchAll(TEST_CALL)].map((match) => match[2] ?? "")),
 ];
 
+const QUOTES = new Set(["'", '"', "`"]);
+
+const skipQuoted = (content: string, start: number): number => {
+  const quote = content[start];
+  for (let index = start + 1; index < content.length; index += 1) {
+    if (content[index] === "\\") index += 1;
+    else if (content[index] === quote) return index;
+  }
+  return content.length;
+};
+
+const closingParen = (content: string, open: number): number => {
+  let depth = 0;
+  for (let index = open; index < content.length; index += 1) {
+    const char = content[index] ?? "";
+    if (QUOTES.has(char)) index = skipQuoted(content, index);
+    else if (content.startsWith("//", index)) index = content.indexOf("\n", index);
+    else if (content.startsWith("/*", index)) index = content.indexOf("*/", index) + 1;
+    else if (char === "(") depth += 1;
+    else if (char === ")" && (depth -= 1) === 0) return index;
+    if (index < 0) return -1;
+  }
+  return -1;
+};
+
+const testBlockOf = (content: string, name: string): { start: number; end: number } | undefined => {
+  for (const match of content.matchAll(TEST_CALL)) {
+    if (match[2] !== name || match.index === undefined) continue;
+    const quoteAt = match.index + match[0].length - name.length - 2;
+    const open = content.lastIndexOf("(", quoteAt);
+    const close = closingParen(content, open);
+    if (close < 0) return undefined;
+    const start = content.lastIndexOf("\n", match.index) + 1;
+    const lineEnd = content.indexOf("\n", close);
+    const end = lineEnd < 0 ? content.length : lineEnd + 1;
+    const blank = /^[ \t]*\n/.exec(content.slice(end));
+    return { start, end: end + (blank?.[0].length ?? 0) };
+  }
+  return undefined;
+};
+
+export const removeTests = (content: string, names: readonly string[]): { content: string; removed: string[] } =>
+  names.reduce(
+    (result, name) => {
+      const block = testBlockOf(result.content, name);
+      return block
+        ? {
+            content: result.content.slice(0, block.start) + result.content.slice(block.end),
+            removed: [...result.removed, name],
+          }
+        : result;
+    },
+    { content, removed: [] as string[] },
+  );
+
 export type TestBaseline = Record<string, { names: string[]; hash: string }>;
 
 export const baselineOf = (

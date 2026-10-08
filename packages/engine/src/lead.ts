@@ -74,6 +74,8 @@ const eventPrompt = (event: LeadEvent): string =>
     `Allowed decisions for this event: ${[...new Set([...event.allowed, "defer"])].join(", ")}.`,
   ].join("\n");
 
+export type LeadBudget = { model?: string; maxTurns?: number };
+
 export type LeadDeps = {
   systemPrompt: string;
   cwd: string;
@@ -91,15 +93,20 @@ export class Lead {
     this.deps = deps;
   }
 
-  decide(event: LeadEvent, onMessage?: (message: SDKMessage) => void): Promise<LeadDecision> {
-    const next = this.queue.then(() => this.decideNow(event, onMessage));
+  decide(
+    event: LeadEvent,
+    onMessage?: (message: SDKMessage) => void,
+    budget: LeadBudget = {},
+  ): Promise<LeadDecision> {
+    const next = this.queue.then(() => this.decideNow(event, onMessage, budget));
     this.queue = next.catch(() => undefined);
     return next;
   }
 
   private async decideNow(
     event: LeadEvent,
-    onMessage?: (message: SDKMessage) => void,
+    onMessage: ((message: SDKMessage) => void) | undefined,
+    budget: LeadBudget,
   ): Promise<LeadDecision> {
     let structured: unknown;
     let failure = "";
@@ -108,7 +115,7 @@ export class Lead {
         prompt: eventPrompt(event),
         options: {
           systemPrompt: this.deps.systemPrompt,
-          model: this.deps.model ?? MODELS.opus,
+          model: budget.model ?? this.deps.model ?? MODELS.opus,
           effort: "medium",
           cwd: this.deps.cwd,
           additionalDirectories: this.deps.additionalDirectories,
@@ -117,7 +124,7 @@ export class Lead {
           tools: LEAD_TOOLS,
           allowedTools: LEAD_TOOLS,
           permissionMode: "dontAsk",
-          maxTurns: 16,
+          maxTurns: budget.maxTurns ?? 16,
           outputFormat: { type: "json_schema", schema: LEAD_SCHEMA },
         },
       })) {

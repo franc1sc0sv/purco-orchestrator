@@ -31,7 +31,7 @@ import { ATTACH_CONFIG_FILE } from "test-forge-mcp-server/src/infrastructure/str
 import type { TestedMutant } from "test-forge-mcp-server/src/application/stryker/run.ts";
 import { resolveScope } from "test-forge-mcp-server/src/application/stryker/scope.ts";
 import { projectKindOf } from "test-forge-mcp-server/src/domain/stryker/scope.ts";
-import { jobOf, runSoloJobs } from "test-forge-mcp-server/src/application/stryker/solo.ts";
+import { jobOf, runSoloJobs, type SoloJob } from "test-forge-mcp-server/src/application/stryker/solo.ts";
 import {
   TIMEOUT_FACTOR,
   TIMEOUT_MS,
@@ -62,6 +62,7 @@ import {
   mapperFailure,
   protectedTestsOf,
   removedProtectedTests,
+  removeTests,
   type ExitDecision,
   type TestBaseline,
 } from "./forge-harden.ts";
@@ -168,6 +169,7 @@ type Ctx = {
   eligible: Set<number>;
   credited: Set<string>;
   refused: Map<string, Refusal>;
+  pruned: string[];
   proofs: Record<string, number[]>;
   emitted: Map<number, string>;
   planned: boolean;
@@ -408,6 +410,7 @@ const prepare = async (host: ForgeHost): Promise<Ctx | string> => {
     eligible: new Set(),
     credited: new Set(),
     refused: new Map(),
+    pruned: [],
     proofs: {},
     emitted: new Map(),
     planned: false,
@@ -887,36 +890,72 @@ const NEEDS_TEST: ReadonlySet<string> = new Set(["survived", "no_coverage", "ref
 const needingTest = (ctx: Ctx): LedgerMutant[] =>
   ledgerMutants(ctx.runId).filter((mutant) => NEEDS_TEST.has(mutant.outcome));
 
-const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]): Promise<string | undefined> => {
-  if (ctx.host.stopped()) return "The run was stopped.";
-  const open = new Set(needingTest(ctx).map((mutant) => mutant.id));
-  const jobs = strykerRowsOf(openDb(), ctx.runId)
-    .filter((row) => open.has(row.id))
-    .map((row) => {
-      const job = jobOf(row);
-      const added = touched.filter((file) => projectKindOf(file) === job.kind);
-      return { ...job, row: { ...row, coveredBy: [] }, testFiles: [...new Set([...job.testFiles, ...added])].sort() };
-    })
-    .filter((job) => job.testFiles.length > 0);
-  if (jobs.length === 0) return undefined;
-  ctx.host.log(`re-check ${label}: ${jobs.length} open mutant(s) run`);
-  const startedAt = Date.now();
+type NamedTest = { file: string; name: string };
+
+const namedTests = (ctx: Ctx, files: readonly string[]): Map<number, NamedTest[]> => {
+  const read = readWorktreeFile(ctx);
+  const byMutant = new Map<number, NamedTest[]>();
+  for (const file of files) {
+    for (const test of newTestsOf({ baseline: ctx.baseline, file, content: read(file), targets: readTargets(targetsFile(ctx, file)) })) {
+      for (const id of test.targets) byMutant.set(id, [...(byMutant.get(id) ?? []), { file: test.file, name: test.name }]);
+    }
+  }
+  return byMutant;
+};
+
+const soloPass = async (
+  ctx: Ctx,
+  label: string,
+  how: string,
+  jobs: readonly SoloJob[],
+): Promise<{ ok: true; open: Set<number> } | { ok: false; reason: string }> => {
   const batch = await tracked(
     ctx,
     {
       kind: "recheck",
       label: `Re-check ${label}`,
-      detail: `${jobs.length} open mutants`,
-      command: "solo runner: each mutant alone in a lane, only its test files",
+      detail: `${jobs.length} open mutants, ${how}`,
+      command: `solo runner: each mutant alone in a lane, ${how}`,
       mutantIds: jobs.map((job) => job.row.id),
       testFiles: [...new Set(jobs.flatMap((job) => job.testFiles))].sort(),
     },
-    () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, jobs),
+    () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, [...jobs]),
   );
-  if (!batch.ok) return `The re-check ${label} failed: ${batch.reason}`;
+  if (!batch.ok) return batch;
+  return {
+    ok: true,
+    open: new Set(batch.results.filter((result) => !KILLED_OUTCOMES.has(result.outcome)).map((result) => result.mutantId)),
+  };
+};
+
+const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]): Promise<string | undefined> => {
+  if (ctx.host.stopped()) return "The run was stopped.";
+  const open = new Set(needingTest(ctx).map((mutant) => mutant.id));
+  const rows = strykerRowsOf(openDb(), ctx.runId).filter((row) => open.has(row.id));
+  if (rows.length === 0) return undefined;
+  const named = namedTests(ctx, touched);
+  const fileJob = (row: (typeof rows)[number]): SoloJob => {
+    const job = jobOf(row);
+    const added = touched.filter((file) => projectKindOf(file) === job.kind);
+    return { ...job, row: { ...row, coveredBy: [] }, testFiles: [...new Set([...job.testFiles, ...added])].sort() };
+  };
+  const startedAt = Date.now();
+  const targeted = rows.flatMap((row) => {
+    const tests = named.get(row.id);
+    return tests ? [jobOf({ ...row, coveredBy: tests })] : [];
+  });
+  const first = targeted.length > 0 ? await soloPass(ctx, label, "only the test that claims it", targeted) : undefined;
+  if (first && !first.ok) return `The re-check ${label} failed: ${first.reason}`;
+  const targetedIds = new Set(targeted.map((job) => job.row.id));
+  const rest = rows
+    .filter((row) => !targetedIds.has(row.id) || first?.open.has(row.id))
+    .map(fileJob)
+    .filter((job) => job.testFiles.length > 0);
+  const second = rest.length > 0 ? await soloPass(ctx, label, "the full test files", rest) : undefined;
+  if (second && !second.ok) return `The re-check ${label} failed: ${second.reason}`;
   publish(ctx);
   ctx.host.log(
-    `re-check ${label}: ${jobs.length} open mutant(s), ${countsText(ledgerMutants(ctx.runId))}, ${Math.round((Date.now() - startedAt) / 1000)} s`,
+    `re-check ${label}: ${rows.length} open mutant(s), ${targeted.length} by the named test, ${rest.length} by full files, ${countsText(ledgerMutants(ctx.runId))}, ${Math.round((Date.now() - startedAt) / 1000)} s`,
   );
   return undefined;
 };
@@ -1071,6 +1110,24 @@ const gate = async (ctx: Ctx, files: readonly string[]): Promise<void> => {
   ctx.host.log(
     `kill gate: ${tests.length} new test(s), ${tests.filter((test) => ctx.credited.has(testKeyOf(test))).length} credited, ${ctx.refused.size} refused`,
   );
+  pruneRefused(ctx);
+};
+
+const pruneRefused = (ctx: Ctx): void => {
+  const byFile = groupBy([...ctx.refused.keys()], (key) => ctx.refused.get(key)?.file ?? "");
+  for (const [file, keys] of byFile) {
+    const protectedNames = new Set(protectedTestsOf(ctx.baseline, file));
+    const names = keys.map((key) => key.slice(file.length + 2)).filter((name) => !protectedNames.has(name));
+    const target = path.join(ctx.cwd, file);
+    const { content, removed } = removeTests(readWorktreeFile(ctx)(file), names);
+    if (removed.length === 0) continue;
+    fs.writeFileSync(target, content);
+    for (const name of removed) {
+      ctx.refused.delete(testKeyOf({ file, name }));
+      ctx.pruned.push(testKeyOf({ file, name }));
+    }
+    ctx.host.log(`kill gate: removed ${removed.length} test(s) that kill no mutant from ${file}`);
+  }
 };
 
 const refusalWork = (ctx: Ctx): Map<string, string[]> => {
@@ -1373,7 +1430,7 @@ const writeReport = (ctx: Ctx, blocker: string | undefined): void => {
       outOfScope: outOfScopeCount(ctx.runId),
       claims: claimsOf(rows.map((row) => row.id)),
       proofs: ctx.proofs,
-      refused: [...ctx.refused.keys()],
+      refused: [...ctx.refused.keys(), ...ctx.pruned],
       blocker,
     }),
   );

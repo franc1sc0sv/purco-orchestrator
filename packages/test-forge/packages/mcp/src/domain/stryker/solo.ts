@@ -41,12 +41,15 @@ export const soloLimitMs = (baselineMs: number): number =>
 export const soloLaneCount = (cpuCount: number, jobCount: number): number =>
   Math.max(1, Math.min(SOLO_MAX_LANES, cpuCount - SOLO_RESERVED_CORES, jobCount));
 
+const PLACEHOLDER = /%[sdifjoO#]|\\\$[A-Za-z_][\w.]*/g;
+
+const namePatternOf = (name: string): string =>
+  name.replace(REGEXP_SPECIALS, "\\$&").replace(PLACEHOLDER, ".*");
+
 export const testNamePatternOf = (names: readonly string[]): string | null => {
   const distinct = [...new Set(names)].sort();
   if (distinct.length === 0) return null;
-  const pattern = `^(?:${distinct
-    .map((name) => name.replace(REGEXP_SPECIALS, "\\$&"))
-    .join("|")})$`;
+  const pattern = `(?:^| )(?:${distinct.map(namePatternOf).join("|")})$`;
   return pattern.length > MAX_NAME_PATTERN_LENGTH ? null : pattern;
 };
 

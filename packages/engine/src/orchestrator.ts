@@ -68,7 +68,7 @@ import { MessageBus } from "./bus.ts";
 import { EscalationRegistry } from "./escalation.ts";
 import { buildHooks } from "./hooks.ts";
 import { takeNotes } from "./notes.ts";
-import { Lead, type LeadDecision, type LeadDecisionKind, type LeadEvent } from "./lead.ts";
+import { Lead, type LeadBudget, type LeadDecision, type LeadDecisionKind, type LeadEvent } from "./lead.ts";
 import {
   handleMessage,
   newTotals,
@@ -145,6 +145,7 @@ const STOP = /^\s*stop\b/i;
 const RERUN = /^\s*rerun\b\s*(\S+)?/i;
 const RETRY = /^\s*(retry|re-?\s?run)\b/i;
 const CONTINUE = /^\s*continue\b/i;
+const TEST_LEAD_TURNS = 6;
 
 const tagged = (tag: string, body: string): string =>
   body ? `<${tag}>\n${body}\n</${tag}>` : "";
@@ -302,15 +303,18 @@ export class Orchestrator {
       decision = { decision: "defer", text: missingResultText(brief.missing) };
     } else {
       this.leadSeq += 1;
+      const budget = this.leadBudget();
       const meter = this.newMeter(
         stepKey,
         `${LEAD_LABEL}#${this.leadSeq}`,
         "lead",
-        this.config.modelOverride ?? MODELS.opus,
-        16,
+        budget.model ?? this.config.modelOverride ?? MODELS.opus,
+        budget.maxTurns ?? 16,
       );
-      decision = await this.lead.decide({ ...event, body: brief.text }, (message) =>
-        meter?.onMessage(message),
+      decision = await this.lead.decide(
+        { ...event, body: brief.text },
+        (message) => meter?.onMessage(message),
+        budget,
       );
       meter?.finish("done");
     }
@@ -331,6 +335,11 @@ export class Orchestrator {
       { event: event.kind, decision },
     );
     return decision;
+  }
+
+  private leadBudget(): LeadBudget {
+    if (this.config.modelOverride || this.tracker.currentPhase() !== "test") return {};
+    return { model: MODELS.sonnet, maxTurns: TEST_LEAD_TURNS };
   }
 
   private newMeter(
@@ -1368,21 +1377,24 @@ export class Orchestrator {
       ...(canRerun ? (["rerun"] as const) : []),
       "stop",
     ];
-    let decision = await this.leadDecide({
-      kind: "step_end",
-      allowed,
-      body: [
-        `Step: ${key}`,
-        `Status: ${outcome.status}`,
-        `Handoff: ${outcome.summary}`,
-        outcome.errors.length ? `Errors: ${outcome.errors.join(" | ").slice(0, 600)}` : "",
-        forBuilder.length ? tagged("reports_for_builder", this.bus.briefing(forBuilder)) : "",
-        judged ? `Briefs: ${this.briefFiles().map((file) => path.basename(file)).join(", ") || "none"}` : "",
-        judged ? `Reruns used for ${step.phase}: ${used} of ${this.workflow.maxReruns}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    });
+    const mechanical = step.phase === "test" && forBuilder.length === 0;
+    let decision: LeadDecision = mechanical
+      ? { decision: "defer", text: outcome.summary }
+      : await this.leadDecide({
+            kind: "step_end",
+            allowed,
+            body: [
+              `Step: ${key}`,
+              `Status: ${outcome.status}`,
+              `Handoff: ${outcome.summary}`,
+              outcome.errors.length ? `Errors: ${outcome.errors.join(" | ").slice(0, 600)}` : "",
+              forBuilder.length ? tagged("reports_for_builder", this.bus.briefing(forBuilder)) : "",
+              judged ? `Briefs: ${this.briefFiles().map((file) => path.basename(file)).join(", ") || "none"}` : "",
+              judged ? `Reruns used for ${step.phase}: ${used} of ${this.workflow.maxReruns}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          });
     if (decision.decision === "defer") {
       decision = await this.humanStepDecision(key, decision.text, allowed);
     }
