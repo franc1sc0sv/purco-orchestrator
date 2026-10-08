@@ -18,6 +18,7 @@ import {
 import type { StrykerMutantRecord } from "../../infrastructure/db/stryker-store.ts";
 import { readTextFile } from "../../infrastructure/files.ts";
 import { MAX_TIMEOUT_MS, runProcess } from "../../infrastructure/process.ts";
+import { leaseSlots } from "../../infrastructure/slots.ts";
 import { projectKeyOf } from "../../infrastructure/project.ts";
 import {
   ensureScaffoldIgnored,
@@ -255,6 +256,8 @@ const classify = (
   return { records, counts, missing };
 };
 
+const MINIMUM_STRYKER_SLOTS = 2;
+
 const runKind = async (
   input: StrykerRunInput,
   root: string,
@@ -263,6 +266,7 @@ const runKind = async (
 ): Promise<KindOutcome | { error: string }> => {
   const startedAt = Date.now();
   const harnessPaths = harnessPathsOf(root);
+  const slots = leaseSlots(input.concurrency ?? strykerConcurrency(cpus().length), MINIMUM_STRYKER_SLOTS);
   const scaffold = writeKindScaffold({
     worktree: root,
     kind: selection.kind,
@@ -271,7 +275,7 @@ const runKind = async (
     manifestPath: harnessPaths.manifestPath,
     testFiles: selection.testFiles,
     mutate: rangeArgumentsOf(selection.inScope),
-    concurrency: input.concurrency ?? strykerConcurrency(cpus().length),
+    concurrency: slots.count,
     timeoutFactor: input.timeoutFactor ?? TIMEOUT_FACTOR,
     timeoutMs: input.timeoutMs ?? TIMEOUT_MS,
     inPlace: input.inPlace ?? false,
@@ -314,7 +318,10 @@ const runKind = async (
     cwd: root,
     timeoutMs: input.strykerTimeoutMs ?? MAX_TIMEOUT_MS,
     env: { FORCE_COLOR: "0", NO_COLOR: "1", FORGE_STRYKER_EVENTS: scaffold.eventsPath },
-  }).finally(() => stopFollowing());
+  }).finally(() => {
+    stopFollowing();
+    slots.release();
+  });
   const logTail = `${execution.stdout}\n${execution.stderr}`.slice(-MAX_LOG_TAIL);
   const reportText = readTextFile(scaffold.reportPath);
   if (execution.code !== 0 || reportText === null) {

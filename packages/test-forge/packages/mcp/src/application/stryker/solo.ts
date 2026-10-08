@@ -8,6 +8,7 @@ import {
 } from "../../domain/stryker/solo.ts";
 import { projectKindOf } from "../../domain/stryker/scope.ts";
 import { openDb } from "../../infrastructure/db/connection.ts";
+import { leaseSlots } from "../../infrastructure/slots.ts";
 import {
   recordSoloOutcome,
   strykerRowsOf,
@@ -120,6 +121,19 @@ export const runSoloJobs = async (
   input: SoloInput,
   jobs: readonly SoloJob[],
 ): Promise<SoloBatch> => {
+  const slots = leaseSlots(soloLaneCount(cpus().length, jobs.length), 1);
+  try {
+    return await runSoloJobsIn(input, jobs, slots.count);
+  } finally {
+    slots.release();
+  }
+};
+
+const runSoloJobsIn = async (
+  input: SoloInput,
+  jobs: readonly SoloJob[],
+  slotCount: number,
+): Promise<SoloBatch> => {
   const root = await repoRoot(input.cwd);
   ensureScaffoldIgnored(root);
   const recovery = recoverBackups(root);
@@ -145,10 +159,7 @@ export const runSoloJobs = async (
   }
   const projectConfigFile = input.projectConfigFile ?? DEFAULT_PROJECT_CONFIG_FILE;
   const dbSetupFile = input.dbSetupFile ?? DEFAULT_DB_SETUP_FILE;
-  const laneCount = Math.min(
-    soloLaneCount(cpus().length, jobs.length),
-    templateBudget - BASELINE_SLOTS,
-  );
+  const laneCount = Math.min(slotCount, templateBudget - BASELINE_SLOTS);
   const pool = input.lanes ?? soloLanePoolOf(root);
   const disposeOwnPool = (): void => {
     if (input.lanes === undefined) pool.dispose();
