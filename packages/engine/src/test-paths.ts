@@ -58,6 +58,11 @@ const runsGit = (command: string): boolean => {
   return [...command.matchAll(SHELL_STRING)].some((match) => runsGit(match[2] ?? match[4] ?? ""));
 };
 
+const TARGETS_FILE = /^targets-[\w.-]+\.json$/;
+
+const isTargetsFile = (resolved: string, forgeDir: string): boolean =>
+  resolved.startsWith(path.resolve(forgeDir) + path.sep) && TARGETS_FILE.test(path.basename(resolved));
+
 export const testWriteRefusal = (
   tool: string,
   input: Record<string, unknown>,
@@ -72,9 +77,7 @@ export const testWriteRefusal = (
   const target = String(input.file_path ?? input.notebook_path ?? "");
   if (target.length === 0) return undefined;
   const resolved = path.resolve(root, target);
-  if (forgeDir !== undefined && resolved.startsWith(path.resolve(forgeDir) + path.sep) && !target.includes("..")) {
-    return undefined;
-  }
+  if (forgeDir !== undefined && isTargetsFile(resolved, forgeDir) && !target.includes("..")) return undefined;
   if (resolved.startsWith(path.resolve(root) + path.sep) && isTestPath(resolved)) return undefined;
   return `A test author writes test files only. "${target}" is production code: report the defect in your handoff instead.`;
 };
