@@ -773,7 +773,7 @@ export class Orchestrator {
                 ? takeNotes({ store: this.store, worktree: this.config.worktree, agent, toolInput })
                 : undefined,
             refuse: spec.testFilesOnly
-              ? (tool, input) => testWriteRefusal(tool, input, this.config.worktree)
+              ? (tool, input) => testWriteRefusal(tool, input, this.config.worktree, path.join(this.config.contextPack, "forge"))
               : undefined,
           }),
           forwardSubagentText: true,

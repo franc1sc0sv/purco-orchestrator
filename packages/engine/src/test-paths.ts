@@ -62,6 +62,7 @@ export const testWriteRefusal = (
   tool: string,
   input: Record<string, unknown>,
   root: string,
+  forgeDir?: string,
 ): string | undefined => {
   if (tool === "Bash") {
     const command = typeof input.command === "string" ? input.command : "";
@@ -71,6 +72,9 @@ export const testWriteRefusal = (
   const target = String(input.file_path ?? input.notebook_path ?? "");
   if (target.length === 0) return undefined;
   const resolved = path.resolve(root, target);
-  if (!resolved.startsWith(path.resolve(root) + path.sep) || isTestPath(resolved)) return undefined;
+  if (forgeDir !== undefined && resolved.startsWith(path.resolve(forgeDir) + path.sep) && !target.includes("..")) {
+    return undefined;
+  }
+  if (isTestPath(resolved)) return undefined;
   return `A test author writes test files only. "${target}" is production code: report the defect in your handoff instead.`;
 };
