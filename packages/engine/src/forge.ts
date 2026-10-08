@@ -290,6 +290,14 @@ type JobKind = "harness" | "stryker" | "recheck" | "suite" | "solo" | "gates";
 
 let jobCount = 0;
 
+let soloChain: Promise<unknown> = Promise.resolve();
+
+const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
+  const next = soloChain.then(work);
+  soloChain = next.catch(() => undefined);
+  return next;
+};
+
 const tracked = async <T>(
   ctx: Ctx,
   job: { kind: JobKind; label: string; detail: string; command: string; mutantIds?: number[]; testFiles?: string[] },
@@ -975,7 +983,7 @@ const soloPass = async (
       mutantIds: jobs.map((job) => job.row.id),
       testFiles: [...new Set(jobs.flatMap((job) => job.testFiles))].sort(),
     },
-    () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, [...jobs]),
+    () => exclusive(() => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, [...jobs])),
   );
   if (!batch.ok) return batch;
   return {
@@ -1101,7 +1109,7 @@ const soloVerify = async (
       mutantIds: jobs.map(({ id }) => id),
       testFiles: [...new Set(jobs.flatMap(({ job }) => job.testFiles))].sort(),
     },
-    () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId, record: false }, jobs.map(({ job }) => job)),
+    () => exclusive(() => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId, record: false }, jobs.map(({ job }) => job))),
   );
   if (!batch.ok) {
     ctx.host.log(`kill gate: the solo check did not run: ${batch.reason}`);
@@ -1548,9 +1556,9 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
   snapshot(ctx, ctx.units.map((unit) => unit.file));
   ctx.host.log(`${ctx.mode}: ${ctx.units.length} test file(s) already pair with the changed code`);
 
-  const needsHarness = resolved.selections.some(
-    (selection) => selection.kind === "backend" && selection.inScope.length > 0,
-  );
+  const needsHarness =
+    ctx.scope === "backend" &&
+    resolved.selections.some((selection) => selection.kind === "backend" && selection.inScope.length > 0);
   let started = false;
   const cancelShutdown = onShutdown(() =>
     Promise.allSettled([
@@ -1584,7 +1592,38 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
   }
 };
 
+const scopesOf = (host: ForgeHost): ForgeScope[] => {
+  if (host.scope) return [host.scope];
+  const kinds = new Set(changedProductionFiles(host.worktree, host.base).map(projectKindOf));
+  const scopes = (["backend", "frontend"] as const).filter((scope) => kinds.has(scope));
+  return scopes.length > 0 ? [...scopes] : ["backend"];
+};
+
+const mergeResults = (results: readonly ForgeResult[]): ForgeResult => {
+  const ran = results.filter((result) => result.refusal === undefined);
+  const counted = ran.length > 0 ? ran : results;
+  return {
+    status: counted.every((result) => result.status === "done") ? "done" : "escalated",
+    summary: results.map((result) => result.summary).join(" | "),
+    runId: counted[0]?.runId ?? null,
+    scope: counted[0]?.scope ?? null,
+    defects: results.flatMap((result) => result.defects),
+    ...(ran.length === 0 && results[0]?.refusal ? { refusal: results[0].refusal } : {}),
+  };
+};
+
 export const runForge = async (host: ForgeHost): Promise<ForgeResult> => {
+  const scopes = scopesOf(host);
+  if (scopes.length === 1) return runScope({ ...host, scope: scopes[0] });
+  host.log(`Test Forge runs ${scopes.join(" and ")} at the same time`);
+  return mergeResults(
+    await Promise.all(
+      scopes.map((scope) => runScope({ ...host, scope, log: (line) => host.log(`[${scope}] ${line}`) })),
+    ),
+  );
+};
+
+const runScope = async (host: ForgeHost): Promise<ForgeResult> => {
   const prepared = await prepare(host);
   if (typeof prepared === "string") {
     host.log(prepared);
