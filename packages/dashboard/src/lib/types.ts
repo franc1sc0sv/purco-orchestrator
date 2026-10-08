@@ -237,6 +237,18 @@ export type TestsView = {
   mutants: MutantEvent[];
   gates: GateMark[];
   activity: { at: string; text: string } | null;
+  jobs: ForgeJob[];
+};
+
+export type ForgeJob = {
+  id: string;
+  kind: string;
+  label: string;
+  detail: string;
+  state: "running" | "done" | "failed";
+  workers: number;
+  startedAt: string;
+  endedAt: string | null;
 };
 
 export type StreamEvent = {

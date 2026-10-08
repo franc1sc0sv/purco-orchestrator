@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { cpus } from "node:os";
+import { cpus, homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PredicateId, WorkItem } from "test-forge-contracts/gates";
@@ -125,7 +125,7 @@ export type ForgeHost = {
   spawn: (job: ForgeJob) => Promise<PhaseOutcome>;
   ask: (kind: HumanItemKind, text: string, payload?: PlanGatePayload) => Promise<string | undefined>;
   decide: (question: string) => Promise<string>;
-  event: (kind: "mutant_plan" | "mutant", text: string, data: Record<string, unknown>) => void;
+  event: (kind: "mutant_plan" | "mutant" | "forge_job", text: string, data: Record<string, unknown>) => void;
   log: (line: string) => void;
   stopped: () => boolean;
 };
@@ -267,12 +267,74 @@ const engagement = (ctx: Ctx, lines: string[]): string =>
     ...lines,
   ].join("\n");
 
+const SLOTS_DIRECTORY = path.join(homedir(), ".test-forge", "slots");
+
+const slotsInUse = (): number => {
+  try {
+    return fs
+      .readdirSync(SLOTS_DIRECTORY)
+      .filter((name) => name.startsWith(`${process.pid}-`))
+      .reduce((sum, name) => {
+        const lease = JSON.parse(fs.readFileSync(path.join(SLOTS_DIRECTORY, name), "utf8")) as { count?: number };
+        return sum + (lease.count ?? 0);
+      }, 0);
+  } catch {
+    return 0;
+  }
+};
+
+type JobKind = "harness" | "stryker" | "recheck" | "suite" | "solo" | "gates";
+
+let jobCount = 0;
+
+const tracked = async <T>(
+  ctx: Ctx,
+  job: { kind: JobKind; label: string; detail: string },
+  work: () => Promise<T>,
+): Promise<T> => {
+  jobCount += 1;
+  const id = `${ctx.runId}-${jobCount}`;
+  const startedAt = new Date().toISOString();
+  let peak = slotsInUse();
+  const emit = (state: "running" | "done" | "failed"): void =>
+    ctx.host.event("forge_job", `${job.label} ${state}`, {
+      id,
+      ...job,
+      state,
+      workers: peak,
+      startedAt,
+      endedAt: state === "running" ? null : new Date().toISOString(),
+    });
+  emit("running");
+  const timer = setInterval(() => {
+    const now = slotsInUse();
+    if (now <= peak) return;
+    peak = now;
+    emit("running");
+  }, 5000);
+  try {
+    const result = await work();
+    emit("done");
+    return result;
+  } catch (error) {
+    emit("failed");
+    throw error;
+  } finally {
+    clearInterval(timer);
+  }
+};
+
 const evaluate = async (ctx: Ctx, run: boolean): Promise<GatesEvaluation> => {
-  const gates = await evaluateGates({
-    cwd: ctx.cwd,
-    runId: ctx.runId,
-    ...(run ? { commands: ctx.commands, probe: {} } : {}),
-  });
+  const gates = await tracked(
+    ctx,
+    { kind: "gates", label: "Gates", detail: run ? "test suite and flake probe" : "ledger check" },
+    () =>
+      evaluateGates({
+        cwd: ctx.cwd,
+        runId: ctx.runId,
+        ...(run ? { commands: ctx.commands, probe: {} } : {}),
+      }),
+  );
   ctx.host.log(
     `pass ${gates.passNo}: ${Object.entries(gates.predicates)
       .map(([id, value]) => `${id.toUpperCase()}=${value ? "T" : "F"}`)
@@ -781,17 +843,24 @@ const passTestFiles = (ctx: Ctx): string[] =>
 const runPass = async (ctx: Ctx, label: string): Promise<string | undefined> => {
   if (ctx.host.stopped()) return "The run was stopped.";
   ctx.host.log(`mutation ${label}: Stryker runs`);
-  const result: MutationPassResult = await mutationPass({
-    cwd: ctx.cwd,
-    base: ctx.host.base,
-    runId: ctx.runId,
-    files: changedProductionFiles(ctx.cwd, ctx.host.base).filter((file) => projectKindOf(file) === ctx.scope),
-    testFiles: passTestFiles(ctx),
-    label: `${ctx.runId}-${label}`,
-    keepHarness: true,
-    onPlanned: () => publishPlan(ctx, ledgerMutants(ctx.runId)),
-    onMutantTested: (tested) => publishTested(ctx, tested),
-  });
+  const files = changedProductionFiles(ctx.cwd, ctx.host.base).filter((file) => projectKindOf(file) === ctx.scope);
+  const testFiles = passTestFiles(ctx);
+  const result: MutationPassResult = await tracked(
+    ctx,
+    { kind: "stryker", label: `Stryker ${label}`, detail: `${files.length} source files, ${testFiles.length} test files` },
+    () =>
+      mutationPass({
+        cwd: ctx.cwd,
+        base: ctx.host.base,
+        runId: ctx.runId,
+        files,
+        testFiles,
+        label: `${ctx.runId}-${label}`,
+        keepHarness: true,
+        onPlanned: () => publishPlan(ctx, ledgerMutants(ctx.runId)),
+        onMutantTested: (tested) => publishTested(ctx, tested),
+      }),
+  );
   if (!result.ok) return `The mutation pass ${label} failed: ${result.reason}`;
   publish(ctx);
   ctx.host.log(
@@ -819,7 +888,11 @@ const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]):
   if (jobs.length === 0) return undefined;
   ctx.host.log(`re-check ${label}: ${jobs.length} open mutant(s) run`);
   const startedAt = Date.now();
-  const batch = await runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, jobs);
+  const batch = await tracked(
+    ctx,
+    { kind: "recheck", label: `Re-check ${label}`, detail: `${jobs.length} open mutants` },
+    () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, jobs),
+  );
   if (!batch.ok) return `The re-check ${label} failed: ${batch.reason}`;
   publish(ctx);
   ctx.host.log(
@@ -831,7 +904,12 @@ const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]):
 const INITIAL_RUN_FAILED = /failed tests in the initial test run/i;
 
 const failingTestWork = async (ctx: Ctx): Promise<Map<string, string[]>> => {
-  const run = await execSuite({ cwd: ctx.cwd, command: ctx.commands.test, files: passTestFiles(ctx) });
+  const files = passTestFiles(ctx);
+  const run = await tracked(
+    ctx,
+    { kind: "suite", label: "Test suite", detail: `${files.length} test files on unchanged code` },
+    () => execSuite({ cwd: ctx.cwd, command: ctx.commands.test, files }),
+  );
   const work = new Map<string, string[]>();
   for (const failure of run.failures) {
     addLines(work, path.relative(ctx.cwd, path.resolve(ctx.cwd, failure.file)), [
@@ -892,7 +970,11 @@ const soloVerify = async (
     }),
   );
   if (jobs.length === 0) return verified;
-  const batch = await runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId, record: false }, jobs.map(({ job }) => job));
+  const batch = await tracked(
+    ctx,
+    { kind: "solo", label: "Kill check", detail: `${jobs.length} mutants against the new tests` },
+    () => runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId, record: false }, jobs.map(({ job }) => job)),
+  );
   if (!batch.ok) {
     ctx.host.log(`kill gate: the solo check did not run: ${batch.reason}`);
     return verified;
@@ -1356,7 +1438,11 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
     ]),
   );
   if (needsHarness) {
-    const booted = await harnessStart({ cwd: resolved.root });
+    const booted = await tracked(
+      ctx,
+      { kind: "harness", label: "Test harness", detail: "test containers, migrations and seed templates" },
+      () => harnessStart({ cwd: resolved.root }),
+    );
     if (!booted.ok) return close(ctx, { blocker: `The test harness did not start: ${booted.reason}` });
     started = !booted.reused;
     ctx.commands = { ...ctx.commands, test: ATTACHED_BACKEND_TEST };

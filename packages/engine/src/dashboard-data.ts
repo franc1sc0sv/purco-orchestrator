@@ -116,7 +116,21 @@ export type TestsView = {
   mutants: MutantEvent[];
   gates: GateMark[];
   activity: { at: string; text: string } | null;
+  jobs: ForgeJobView[];
 };
+
+export type ForgeJobView = {
+  id: string;
+  kind: string;
+  label: string;
+  detail: string;
+  state: "running" | "done" | "failed";
+  workers: number;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+const MAX_FORGE_JOBS = 8;
 
 export type TicketParts = {
   summary: TicketSummary;
@@ -398,10 +412,16 @@ const readTests = (store: Store): TestsView => {
   }
   const line = store.latestForgeGateLine() ?? "";
   const note = store.latestForgeNote();
+  const jobs = new Map<string, ForgeJobView>();
+  for (const row of store.eventsOfKind("forge_job")) {
+    const job = parseData(row.data) as unknown as ForgeJobView;
+    jobs.set(job.id, job);
+  }
   return {
     planned: [...planned.values()].sort((a, b) => a.id - b.id),
     mutants: [...results.values()].sort((a, b) => a.id - b.id),
     gates: [...line.matchAll(GATE_MARK)].map((match) => ({ id: match[1] ?? "", pass: match[2] === "T" })),
+    jobs: [...jobs.values()].slice(-MAX_FORGE_JOBS),
     activity: note ? { at: note.at, text: note.summary.replace(/^forge: /, "") } : null,
   };
 };
@@ -431,7 +451,7 @@ const readParts = (ticket: string, store: Store, nowMs: number): TicketParts => 
         }),
       { questions: [] },
     ),
-    tests: attempt(() => readTests(store), { planned: [], mutants: [], gates: [], activity: null }),
+    tests: attempt(() => readTests(store), { planned: [], mutants: [], gates: [], activity: null, jobs: [] }),
   };
 };
 

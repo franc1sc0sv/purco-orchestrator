@@ -7,6 +7,11 @@ import type { PipelineStage, TestsView } from "@/lib/types";
 export const isTesting = (pipeline: PipelineStage[]): boolean =>
   pipeline.some((stage) => stage.stage === "testing" && stage.steps.some((step) => step.status === "running"));
 
+export const forgeProgress = (tests: TestsView): string | undefined => {
+  const stats = buildStats(buildCells(tests, false));
+  return stats.total === 0 ? undefined : `tested ${stats.run} of ${stats.total}, open ${stats.survived}`;
+};
+
 const Count = ({ label, value }: { label: string; value: number }) => (
   <span className="text-muted-foreground font-mono text-xs">
     {label} <span className="text-foreground font-semibold">{value}</span>

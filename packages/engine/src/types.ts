@@ -160,6 +160,7 @@ export type EventKind =
   | "permission_denied"
   | "mutant"
   | "mutant_plan"
+  | "forge_job"
   | "cost";
 
 export type ScratchpadEvent = {

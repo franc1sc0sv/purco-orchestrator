@@ -16,10 +16,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { eventsOfWorker, nowDoing, shortTarget, toolLabel } from "@/lib/agent-activity";
 import { STEP_TONE, TONES, WORKER_LABEL, WORKER_TONE, isWorkerBusy, type Tone } from "@/lib/colors";
-import { formatCost, formatTokens, shortModel } from "@/lib/format";
+import { formatCost, formatDuration, formatTokens, shortModel } from "@/lib/format";
 import {
   STAGES,
   STAGE_LABELS,
+  type ForgeJob,
   type PipelineStage,
   type Stage,
   type StreamEvent,
@@ -31,7 +32,10 @@ type LeadData = { tone: Tone; busy: boolean };
 type StageData = { label: string; tone: Tone; busy: boolean };
 type WorkerData = { worker: Worker; busy: boolean; ended: boolean; chip: string | undefined; selected: boolean };
 
+type JobData = { job: ForgeJob; tone: Tone; busy: boolean; elapsedMs: number; progress: string | undefined };
+
 type LeadNode = Node<LeadData, "lead">;
+type JobNode = Node<JobData, "job">;
 type StageNode = Node<StageData, "stage">;
 type WorkerNode = Node<WorkerData, "worker">;
 
@@ -131,6 +135,41 @@ const WorkerView = ({ data }: NodeProps<WorkerNode>) => {
   );
 };
 
+const JobView = ({ data }: NodeProps<JobNode>) => {
+  const { job } = data;
+  return (
+    <Card
+      className={cn(
+        "w-52 gap-1 border-2 border-dashed p-2.5 text-xs transition-opacity duration-1000",
+        TONES[data.tone].vars,
+        TONES[data.tone].node,
+        data.busy && "animate-node-glow",
+        !data.busy && "opacity-40",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate font-semibold">{job.label}</span>
+        <Badge variant="secondary" className="font-mono">
+          {job.kind}
+        </Badge>
+      </div>
+      <ToneBadge tone={data.tone} pulse={data.busy} className="normal-case tracking-normal">
+        {data.busy ? "running" : job.state}
+      </ToneBadge>
+      <div className="text-muted-foreground truncate font-mono" title={job.detail}>
+        {data.progress ?? job.detail}
+      </div>
+      <div className="flex justify-between font-mono">
+        <span>{job.workers > 0 ? `${job.workers} workers` : "-"}</span>
+        <span>{formatDuration(data.elapsedMs)}</span>
+      </div>
+      <Anchors />
+    </Card>
+  );
+};
+
+const JOB_TONE: Record<ForgeJob["state"], Tone> = { running: "running", done: "done", failed: "failed" };
+
 const FIT_PADDING = 0.04;
 
 const Refit = () => {
@@ -142,7 +181,7 @@ const Refit = () => {
   return null;
 };
 
-const nodeTypes = { lead: LeadView, stage: StageView, worker: WorkerView };
+const nodeTypes = { lead: LeadView, stage: StageView, worker: WorkerView, job: JobView };
 
 const stageOf = (worker: Worker): Stage => worker.stage ?? "plan";
 
@@ -179,6 +218,7 @@ const buildGraph = (
   alive: boolean,
   stuck: boolean,
   view: { chips: Map<string, string>; selectedId: string | undefined },
+  forge: { jobs: ForgeJob[]; progress: string | undefined; now: number },
 ): { nodes: Node[]; edges: Edge[]; height: number } => {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -190,8 +230,12 @@ const buildGraph = (
   const groups = pipeline.map((stage) => ({
     stage,
     own: shown.filter((worker) => stageOf(worker) === stage.stage),
+    jobs: stage.stage === "testing" ? forge.jobs : [],
   }));
-  const totalHeight = groups.reduce((sum, group) => sum + rowsOf(group.own.length) * ROW_HEIGHT, 0);
+  const totalHeight = groups.reduce(
+    (sum, group) => sum + rowsOf(group.own.length + group.jobs.length) * ROW_HEIGHT,
+    0,
+  );
 
   nodes.push({
     id: "lead",
@@ -205,8 +249,8 @@ const buildGraph = (
   } satisfies LeadNode);
 
   let cursor = 0;
-  for (const { stage, own } of groups) {
-    const groupHeight = rowsOf(own.length) * ROW_HEIGHT;
+  for (const { stage, own, jobs } of groups) {
+    const groupHeight = rowsOf(own.length + jobs.length) * ROW_HEIGHT;
     const busy = own.some((worker) => liveIds.has(worker.id) && isWorkerBusy(worker.state));
     nodes.push({
       id: `stage:${stage.stage}`,
@@ -256,6 +300,40 @@ const buildGraph = (
         ...workerEdge(worker, live, stuck),
       });
     });
+    jobs.forEach((job, offset) => {
+      const index = own.length + offset;
+      const busy = alive && job.state === "running";
+      const tone: Tone = job.state === "running" && !alive ? "halted" : JOB_TONE[job.state];
+      const previous = index === 0 ? undefined : index <= own.length ? `worker:${own[index - 1]?.id}` : `job:${jobs[offset - 1]?.id}`;
+      nodes.push({
+        id: `job:${job.id}`,
+        type: "job",
+        position: {
+          x: WORKER_X + (index % WORKER_COLUMNS) * WORKER_COLUMN_WIDTH,
+          y: cursor + Math.floor(index / WORKER_COLUMNS) * ROW_HEIGHT + 6,
+        },
+        data: {
+          job,
+          tone,
+          busy,
+          elapsedMs: (job.endedAt ? Date.parse(job.endedAt) : forge.now) - Date.parse(job.startedAt),
+          progress: busy && (job.kind === "stryker" || job.kind === "recheck") ? forge.progress : undefined,
+        },
+        draggable: false,
+      } satisfies JobNode);
+      edges.push({
+        id: `${stage.stage}->job:${job.id}`,
+        source: index % WORKER_COLUMNS === 0 || previous === undefined ? `stage:${stage.stage}` : previous,
+        target: `job:${job.id}`,
+        animated: busy && !stuck,
+        style: {
+          stroke: TONES[tone].color,
+          strokeWidth: 2,
+          strokeDasharray: TONES[tone].dash,
+          opacity: busy ? 1 : 0.3,
+        },
+      });
+    });
     cursor += groupHeight;
   }
   return { nodes, edges, height: totalHeight };
@@ -268,6 +346,9 @@ export const AgentDiagram = ({
   alive,
   stuck,
   events,
+  jobs,
+  progress,
+  now,
   selectedId,
   onSelect,
 }: {
@@ -277,6 +358,9 @@ export const AgentDiagram = ({
   alive: boolean;
   stuck: boolean;
   events: StreamEvent[];
+  jobs: ForgeJob[];
+  progress: string | undefined;
+  now: number;
   selectedId: string | undefined;
   onSelect: (workerId: string) => void;
 }) => {
@@ -291,8 +375,9 @@ export const AgentDiagram = ({
     return new Map(entries);
   }, [workers, liveWorkerIds, events]);
   const graph = useMemo(
-    () => buildGraph(workers, new Set(liveWorkerIds), pipeline, alive, stuck, { chips, selectedId }),
-    [workers, liveWorkerIds, pipeline, alive, stuck, chips, selectedId],
+    () =>
+      buildGraph(workers, new Set(liveWorkerIds), pipeline, alive, stuck, { chips, selectedId }, { jobs, progress, now }),
+    [workers, liveWorkerIds, pipeline, alive, stuck, chips, selectedId, jobs, progress, now],
   );
   const structure = graph.nodes.map((node) => node.id).join("|");
   return (

@@ -3,7 +3,7 @@ import { AgentPanel } from "@/components/agent-panel";
 import { AlertList } from "@/components/alert-list";
 import { AnswerNeeded } from "@/components/answer-needed";
 import { FailedSteps, failedStepsOf } from "@/components/failed-steps";
-import { ForgeActivity, isTesting } from "@/components/forge-activity";
+import { ForgeActivity, forgeProgress, isTesting } from "@/components/forge-activity";
 import { GatePanel } from "@/components/gate-panel";
 import { Panel } from "@/components/panel";
 import { PanelSkeleton } from "@/components/screen-skeleton";
@@ -77,6 +77,9 @@ export const LiveTab = ({
               alive={summary.activeRun !== null}
               stuck={summary.state === "stuck"}
               events={detail.events}
+              jobs={detail.tests.jobs}
+              progress={forgeProgress(detail.tests)}
+              now={clockNow}
               selectedId={selected?.id}
               onSelect={(workerId) => {
                 window.location.hash = ticketHref(ticketId, "live", { ...keep, agent: workerId });

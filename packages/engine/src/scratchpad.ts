@@ -24,6 +24,7 @@ const KIND_GLYPH: Record<EventKind, string> = {
   permission_denied: "DENIED",
   mutant: "MUTANT",
   mutant_plan: "PLAN",
+  forge_job: "JOB",
   cost: "COST",
 };
 
