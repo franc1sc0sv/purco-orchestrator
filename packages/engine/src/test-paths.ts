@@ -69,6 +69,8 @@ export const testWriteRefusal = (
   }
   if (!WRITING_TOOLS.has(tool)) return undefined;
   const target = String(input.file_path ?? input.notebook_path ?? "");
-  if (target.length === 0 || isTestPath(path.resolve(root, target))) return undefined;
+  if (target.length === 0) return undefined;
+  const resolved = path.resolve(root, target);
+  if (!resolved.startsWith(path.resolve(root) + path.sep) || isTestPath(resolved)) return undefined;
   return `A test author writes test files only. "${target}" is production code: report the defect in your handoff instead.`;
 };
