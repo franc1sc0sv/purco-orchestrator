@@ -217,7 +217,10 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
     phase: "test",
     description:
       "Owns one test file. Writes tests that kill the surviving mutants it is given, runs only that file, and lists the mutants each new test kills. Never edits production code.",
-    tools: [...WRITE_TOOLS, ...forgeTools("codex_rule_get", "codex_fixture_list", "ast_file_facts")],
+    tools: [
+      ...WRITE_TOOLS,
+      ...forgeTools("codex_rule_get", "codex_fixture_list", "ast_file_facts", "mutation_equivalence_record"),
+    ],
     writes: true,
     needsForge: true,
     testFilesOnly: true,
@@ -306,7 +309,7 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
   },
   "equivalence-hunter": {
     role: "equivalence-hunter",
-    model: MODELS.opus,
+    model: MODELS.sonnet,
     phase: "test",
     description:
       "Tries to refute each equivalence claim on one production file with a named observable difference and the input that produces it.",
@@ -316,8 +319,8 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
     ],
     writes: false,
     needsForge: true,
-    effort: "high",
-    maxTurns: 60,
+    effort: "medium",
+    maxTurns: 15,
   },
 };
 

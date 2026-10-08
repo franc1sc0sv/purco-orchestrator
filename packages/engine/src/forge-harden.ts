@@ -120,6 +120,18 @@ export const removeTests = (content: string, names: readonly string[]): { conten
     { content, removed: [] as string[] },
   );
 
+const OUTLINE_LINE =
+  /^\s*(?:import\b|export\b|(?:const|let|function|async function|class)\s|describe\b|it\b|test\b|(?:before|after)(?:Each|All)\b|vi\.mock\b)/;
+const OUTLINE_LIMIT = 400;
+const OUTLINE_WIDTH = 140;
+
+export const testOutline = (content: string): string =>
+  content
+    .split("\n")
+    .flatMap((line, index) => (OUTLINE_LINE.test(line) ? [`${index + 1}: ${line.trim().slice(0, OUTLINE_WIDTH)}`] : []))
+    .slice(0, OUTLINE_LIMIT)
+    .join("\n");
+
 export type TestBaseline = Record<string, { names: string[]; hash: string }>;
 
 export const baselineOf = (

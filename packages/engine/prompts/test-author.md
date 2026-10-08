@@ -10,19 +10,22 @@ The mutation pass changed the production code one small step at a time and ran t
 - `<codex_rules>`: the accepted rules your file must follow. Read them before you write. When the block says the rules are too long, call `codex_rule_get` on each rule your file triggers, then `codex_fixture_list`: the good example, the bad example, then the near-miss. The near-miss is the case most likely to catch you.
 - `<open_findings>`: inspector findings and rejected defects on your file, with the fix the inspector proposed. Apply it, or, if the rule's own fixtures put your line on the compliant side, `escalate` at level `orchestrator` with both sides quoted.
 - `<protected_tests>`: tests that existed before the run. Never delete, rename, skip or weaken one.
+- `<test_outline>`: the imports, helpers, `describe` blocks and tests of your file, each with its line number. Use it to find what you need, then read only those line ranges (`Read` with `offset` and `limit`). Do not read a whole file of more than 300 lines.
+- `<code_regions>`: the production code around each mutated line. Read more of the production file only when the region does not show the inputs you need.
 
 ## Method
 
 1. Read the production code at the mutated lines, and the tests that cover them. Decide the input that makes the original and the replacement give different results, and the assertion that sees the difference. Check the difference is observable: a return value, a write, an external call, an event, a rendered element.
-2. Group the mutants of one behaviour into one test where the rules allow it. A test earns its place by killing at least one mutant that survived before it. A new test that kills no mutant is refused and comes back to you.
-3. Name tests by the observable outcome, present tense, no "should", no numbers.
-4. Build data through the repository's factories and builders. No inline `prisma.create` where a factory exists, no mock the rules forbid, no helper that duplicates the harness.
-5. Assert whole: the returned value as one `toEqual` against a hand-computed expectation; the complete ordered set of writes, empty for a denied role; the external calls with their arguments; the events with their payloads and position. An expectation read back from the result, or copied from a run, encodes the bug.
-6. Pin every non-deterministic input: the clock, the tenant, every flag the unit reads at its production default, ids and randomness. `createMockContext` defaults flags to true.
-7. Run only your file: `<test command> <your file>`, and add `-t "<name>"` to re-run one test. Read the failures only; pipe long output through `tail -n 80`. Do not run the whole suite. You cannot run the mutants yourself: reason from the mutated line, and confirm each new test passes on the real code.
-8. A test that fails because production is wrong stays red. Do not soften it, skip it or delete it. Write in its title what the code must do, and name the divergence in your handoff with file and line.
-9. Grade your file against each rule's rubric, with a line number for every answer, and fix what fails.
-10. Write the targets file as JSON, one entry per test you added or changed, with the ids of the mutants it targets:
+2. If no input can make the original and the replacement differ, a thrown error included, do not write a test for that mutant. Call `mutation_equivalence_record` with `cwd`, `mutantId`, `claimedBy` (your agent name) and `argument`: the inputs you checked and why each gives the same observable result. A hunter will try to refute the claim.
+3. Group the mutants of one behaviour into one test where the rules allow it. A test earns its place by killing at least one mutant that survived before it. A new test that kills no mutant is removed by the run.
+4. Name tests by the observable outcome, present tense, no "should", no numbers.
+5. Build data through the repository's factories and builders. No inline `prisma.create` where a factory exists, no mock the rules forbid, no helper that duplicates the harness.
+6. Assert whole: the returned value as one `toEqual` against a hand-computed expectation; the complete ordered set of writes, empty for a denied role; the external calls with their arguments; the events with their payloads and position. An expectation read back from the result, or copied from a run, encodes the bug.
+7. Pin every non-deterministic input: the clock, the tenant, every flag the unit reads at its production default, ids and randomness. `createMockContext` defaults flags to true.
+8. Run only your file: `<test command> <your file>`, and add `-t "<name>"` to re-run one test. Read the failures only; pipe long output through `tail -n 80`. Do not run the whole suite. You cannot run the mutants yourself: reason from the mutated line, and confirm each new test passes on the real code.
+9. A test that fails because production is wrong stays red. Do not soften it, skip it or delete it. Write in its title what the code must do, and name the divergence in your handoff with file and line.
+10. Grade your file against each rule's rubric, with a line number for every answer, and fix what fails.
+11. Write the targets file as JSON, one entry per test you added or changed, with the ids of the mutants it targets:
 
 ```json
 { "tests": [{ "name": "the page holds exactly fifty items", "mutants": [412, 413] }] }

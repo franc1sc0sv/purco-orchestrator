@@ -63,6 +63,7 @@ import {
   protectedTestsOf,
   removedProtectedTests,
   removeTests,
+  testOutline,
   type ExitDecision,
   type TestBaseline,
 } from "./forge-harden.ts";
@@ -246,8 +247,6 @@ const requestsFile = (ctx: Ctx, file: string): string =>
   path.join(ctx.dir, `requests-${fileSlug(file)}.json`);
 const targetsFile = (ctx: Ctx, file: string): string =>
   path.join(ctx.dir, `targets-${fileSlug(file)}.json`);
-const holesFile = (ctx: Ctx, source: string): string =>
-  path.join(ctx.dir, `holes-${fileSlug(source)}.json`);
 
 const readJsonList = <T>(file: string, key: string): T[] => {
   if (!fs.existsSync(file)) return [];
@@ -564,6 +563,52 @@ const authorTask = (ctx: Ctx, unit: Unit): string =>
         ]),
       ].join("\n");
 
+const REGION_MARGIN = 12;
+
+const mergeRanges = (ranges: readonly [number, number][]): [number, number][] =>
+  [...ranges]
+    .sort((a, b) => a[0] - b[0])
+    .reduce<[number, number][]>((merged, range) => {
+      const last = merged[merged.length - 1];
+      if (last && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1]);
+      else merged.push([range[0], range[1]]);
+      return merged;
+    }, []);
+
+const codeRegions = (ctx: Ctx, items: readonly string[]): string => {
+  const ids = new Set(items.flatMap((line) => /^M(\d+)\b/.exec(line)?.slice(1, 2).map(Number) ?? []));
+  if (ids.size === 0) return "";
+  const byFile = groupBy(
+    ledgerMutants(ctx.runId).filter((mutant) => ids.has(mutant.id)),
+    (mutant) => mutant.file,
+  );
+  return [...byFile]
+    .map(([file, group]) => {
+      const source = path.resolve(ctx.cwd, file);
+      const lines = fs.existsSync(source) ? fs.readFileSync(source, "utf8").split("\n") : [];
+      return mergeRanges(
+        group.map((mutant) => [
+          Math.max(1, mutant.line - REGION_MARGIN),
+          Math.min(lines.length, mutant.endLine + REGION_MARGIN),
+        ]),
+      )
+        .map(([from, to]) =>
+          [`${file}:${from}-${to}`, ...lines.slice(from - 1, to).map((text, offset) => `${from + offset}: ${text}`)].join("\n"),
+        )
+        .join("\n\n");
+    })
+    .join("\n\n");
+};
+
+const fileRules = async (ctx: Ctx, file: string): Promise<string> => {
+  try {
+    const { rules } = await rulesFor({ cwd: ctx.cwd, scope: ctx.scope, filePath: file });
+    return rules.length > 0 ? rulesText(rules) : ctx.rules;
+  } catch {
+    return ctx.rules;
+  }
+};
+
 const write = async (ctx: Ctx, work: Map<string, string[]>, label: string): Promise<void> => {
   const files = [...work.keys()];
   snapshot(ctx, files);
@@ -580,7 +625,9 @@ const write = async (ctx: Ctx, work: Map<string, string[]>, label: string): Prom
         tagged("work_items", items.join("\n")),
         tagged("open_findings", findings),
         tagged("protected_tests", protectedTestsOf(ctx.baseline, unit.file).map((name) => `- ${name}`).join("\n")),
-        tagged("codex_rules", ctx.rules),
+        tagged("test_outline", testOutline(readWorktreeFile(ctx)(unit.file))),
+        tagged("code_regions", codeRegions(ctx, items)),
+        tagged("codex_rules", await fileRules(ctx, unit.file)),
       ],
     });
   });
@@ -1130,12 +1177,6 @@ const pruneRefused = (ctx: Ctx): void => {
   }
 };
 
-const refusalWork = (ctx: Ctx): Map<string, string[]> => {
-  const work = new Map<string, string[]>();
-  for (const refusal of ctx.refused.values()) addLines(work, refusal.file, [refusal.line]);
-  return work;
-};
-
 const unitFileFor = (ctx: Ctx, source: string): string =>
   ctx.units.find((unit) => unit.sources.includes(source))?.file ?? fallbackTestPath(source);
 
@@ -1183,31 +1224,8 @@ const killRound = async (
   return undefined;
 };
 
-const huntSurvivors = async (ctx: Ctx, round: number): Promise<Map<string, string[]>> => {
-  const survived = mutants(ctx, ["survived", "no_coverage"]);
-  const rows = new Map(ledgerMutants(ctx.runId).map((row) => [row.id, row]));
-  await inBatches([...groupBy(survived, (mutant) => mutant.file_path)], async ([source, group]) => {
-    await ctx.host.spawn({
-      role: "survivor-analyst",
-      name: `survivors-${round}:${path.basename(source)}`,
-      task: [
-        `Analyse the surviving mutants of ${source}.`,
-        "",
-        engagement(ctx, [
-          `- the production file: ${source}`,
-          `- the mutant ids: ${group.map((mutant) => mutant.id).join(", ")}`,
-          `- write the coverage holes to: ${holesFile(ctx, source)}`,
-        ]),
-      ].join("\n"),
-      parts: [
-        tagged(
-          "mutants",
-          group.flatMap((mutant) => (rows.get(mutant.id) ? [mutantLine(rows.get(mutant.id) as LedgerMutant)] : [])).join("\n"),
-        ),
-      ],
-    });
-  });
-  const claimed = mutants(ctx, ["equivalent-claimed"]);
+const huntClaims = async (ctx: Ctx, round: number): Promise<void> => {
+  const claimed = mutants(ctx, ["equivalent-claimed"]).filter((mutant) => !ctx.hunted.has(mutant.id));
   await inBatches([...groupBy(claimed, (mutant) => mutant.file_path)], async ([source, group]) => {
     const ids = group.map((mutant) => mutant.id);
     const outcome = await ctx.host.spawn({
@@ -1231,32 +1249,24 @@ const huntSurvivors = async (ctx: Ctx, round: number): Promise<Map<string, strin
             2,
           ),
         ),
+        tagged("code_regions", codeRegions(ctx, ids.map((id) => `M${id}`))),
       ],
     });
     if (outcome.status === "done") for (const id of ids) ctx.hunted.add(id);
   });
+};
 
-  const hints = new Map<number, string>();
-  for (const source of new Set(survived.map((mutant) => mutant.file_path))) {
-    for (const hole of readJsonList<{ mutantId: number; test: string }>(holesFile(ctx, source), "holes")) {
-      hints.set(hole.mutantId, hole.test);
-    }
-  }
-  const refuted = mutants(ctx, ["refuted"]);
+const openWork = async (ctx: Ctx): Promise<Map<string, string[]>> => {
+  const open = needingTest(ctx);
   const refutations = all<{ mutant_id: number; refutation: string }>(
     openDb(),
-    `SELECT mutant_id, refutation FROM equivalence_claims WHERE refuted_by IS NOT NULL AND mutant_id IN (${refuted.map(() => "?").join(", ") || "NULL"})`,
-    refuted.map((mutant) => mutant.id),
+    `SELECT mutant_id, refutation FROM equivalence_claims WHERE refuted_by IS NOT NULL AND mutant_id IN (${open.map(() => "?").join(", ") || "NULL"})`,
+    open.map((mutant) => mutant.id),
   );
-  for (const mutant of refuted) {
-    const text = refutations.find((entry) => entry.mutant_id === mutant.id)?.refutation ?? "";
-    hints.set(mutant.id, `not equivalent: ${text.slice(0, 600)}`);
-  }
-  const targets = [...hints.keys()].flatMap((id) => {
-    const row = rows.get(id);
-    return row ? [row] : [];
-  });
-  return mutantWork(ctx, targets, hints);
+  const hints = new Map(
+    refutations.map((entry) => [entry.mutant_id, `not equivalent: ${entry.refutation.slice(0, 600)}`] as const),
+  );
+  return mutantWork(ctx, open, hints);
 };
 
 const signEquivalences = async (ctx: Ctx): Promise<void> => {
@@ -1308,28 +1318,27 @@ const mutationStage = async (ctx: Ctx): Promise<string | undefined> => {
     ? new Set(readJsonList<number>(eligibleFile(ctx), "ids"))
     : new Set(openMutants(first).map((mutant) => mutant.id));
   fs.writeFileSync(eligibleFile(ctx), JSON.stringify({ ids: [...ctx.eligible] }));
-  ctx.host.log(`mutation baseline: ${first.length} in scope, ${ctx.eligible.size} open`);
+  ctx.host.log(`mutation baseline: ${first.length} in scope, ${needingTest(ctx).length} open`);
 
-  const openCount = (): number => needingTest(ctx).length;
+  const progress = (): string => {
+    const killed = ledgerMutants(ctx.runId).filter((mutant) => KILLED_OUTCOMES.has(mutant.outcome)).length;
+    const refuted = all<{ count: number }>(
+      openDb(),
+      "SELECT COUNT(DISTINCT c.mutant_id) AS count FROM equivalence_claims c JOIN mutants m ON m.id = c.mutant_id WHERE m.run_id = ? AND c.refuted_by IS NOT NULL",
+      [ctx.runId],
+    )[0]?.count ?? 0;
+    return `${killed}/${refuted}`;
+  };
 
-  const uncovered = openMutants(ledgerMutants(ctx.runId)).filter((mutant) => mutant.outcome === "no_coverage");
-  if (uncovered.length > 0) {
+  for (let round = 1, before = progress(); needingTest(ctx).length > 0; round += 1) {
     ctx.pass += 1;
-    const work = await mutantWork(ctx, uncovered, new Map());
-    for (const [file, lines] of refusalWork(ctx)) addLines(work, file, lines);
-    const failure = work.size > 0 ? await killRound(ctx, "cover", work) : undefined;
-    if (failure) return failure;
-  }
-
-  for (let round = 1, before = openCount(); ; round += 1) {
-    ctx.pass += 1;
-    const work = await huntSurvivors(ctx, round);
-    for (const [file, lines] of refusalWork(ctx)) addLines(work, file, lines);
+    const work = await openWork(ctx);
     if (work.size === 0) break;
-    const failure = await killRound(ctx, `hole-${round}`, work);
+    const failure = await killRound(ctx, `round-${round}`, work);
     if (failure) return failure;
-    const after = openCount();
-    if (after >= before) break;
+    await huntClaims(ctx, round);
+    const after = progress();
+    if (after === before) break;
     before = after;
   }
   await signEquivalences(ctx);
