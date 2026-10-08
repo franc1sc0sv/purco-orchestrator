@@ -54,6 +54,7 @@ export class Scratchpad {
     this.ticket = ticket;
     this.echo = echo;
     this.store = store;
+    this.seq = store?.lastEventSeq() ?? 0;
     fs.mkdirSync(runDir, { recursive: true });
     this.eventStream = fs.createWriteStream(path.join(runDir, "events.jsonl"), {
       flags: "a",

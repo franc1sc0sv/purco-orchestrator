@@ -529,6 +529,13 @@ export class Store {
       .run(new Date().toISOString(), status, this.runId);
   }
 
+  lastEventSeq(): number {
+    const row = this.db
+      .prepare("select max(seq) as seq from events where run_id = ?")
+      .get(this.runId) as { seq: number | null } | undefined;
+    return row?.seq ?? 0;
+  }
+
   recordEvent(event: ScratchpadEvent): void {
     this.db
       .prepare(
