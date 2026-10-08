@@ -115,6 +115,7 @@ export type TestsView = {
   planned: PlannedMutant[];
   mutants: MutantEvent[];
   gates: GateMark[];
+  activity: { at: string; text: string } | null;
 };
 
 export type TicketParts = {
@@ -257,7 +258,7 @@ export const deriveTicketState = (input: {
   if (live.some((worker) => isStuck(worker, nowMs))) return "stuck";
   const waiting =
     live.some((worker) => WAITING_STATES.includes(worker.state)) ||
-    statuses.includes("waiting");
+    (statuses.includes("waiting") && !statuses.includes("running"));
   if (waiting) return "waiting";
   if (settled && !statuses.includes("running")) return settled;
   return "running";
@@ -396,10 +397,12 @@ const readTests = (store: Store): TestsView => {
     results.set(mutant.id, mutant);
   }
   const line = store.latestForgeGateLine() ?? "";
+  const note = store.latestForgeNote();
   return {
     planned: [...planned.values()].sort((a, b) => a.id - b.id),
     mutants: [...results.values()].sort((a, b) => a.id - b.id),
     gates: [...line.matchAll(GATE_MARK)].map((match) => ({ id: match[1] ?? "", pass: match[2] === "T" })),
+    activity: note ? { at: note.at, text: note.summary.replace(/^forge: /, "") } : null,
   };
 };
 
@@ -428,7 +431,7 @@ const readParts = (ticket: string, store: Store, nowMs: number): TicketParts => 
         }),
       { questions: [] },
     ),
-    tests: attempt(() => readTests(store), { planned: [], mutants: [], gates: [] }),
+    tests: attempt(() => readTests(store), { planned: [], mutants: [], gates: [], activity: null }),
   };
 };
 

@@ -1352,6 +1352,16 @@ export class Store {
     return row?.summary;
   }
 
+  latestForgeNote(): { at: string; summary: string } | undefined {
+    return this.db
+      .prepare(
+        `select at, summary from events
+          where kind = 'note' and summary like 'forge: %'
+          order by rowid desc limit 1`,
+      )
+      .get() as { at: string; summary: string } | undefined;
+  }
+
   recentStreamEvents(limit: number): StoredStreamEvent[] {
     const rows = this.db
       .prepare(

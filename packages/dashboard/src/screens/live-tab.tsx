@@ -3,6 +3,7 @@ import { AgentPanel } from "@/components/agent-panel";
 import { AlertList } from "@/components/alert-list";
 import { AnswerNeeded } from "@/components/answer-needed";
 import { FailedSteps, failedStepsOf } from "@/components/failed-steps";
+import { ForgeActivity, isTesting } from "@/components/forge-activity";
 import { GatePanel } from "@/components/gate-panel";
 import { Panel } from "@/components/panel";
 import { PanelSkeleton } from "@/components/screen-skeleton";
@@ -65,6 +66,7 @@ export const LiveTab = ({
       <Card className="px-4 py-2">
         <PipelineStrip pipeline={detail.pipeline} cost={detail.cost} nowMs={clockNow} />
       </Card>
+      {isTesting(detail.pipeline) ? <ForgeActivity tests={detail.tests} now={clockNow} /> : null}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(380px,34%)] gap-3">
         <Panel title="Agents">
           <Suspense fallback={<PanelSkeleton />}>

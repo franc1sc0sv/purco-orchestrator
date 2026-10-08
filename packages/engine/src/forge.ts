@@ -780,6 +780,7 @@ const passTestFiles = (ctx: Ctx): string[] =>
 
 const runPass = async (ctx: Ctx, label: string): Promise<string | undefined> => {
   if (ctx.host.stopped()) return "The run was stopped.";
+  ctx.host.log(`mutation ${label}: Stryker runs`);
   const result: MutationPassResult = await mutationPass({
     cwd: ctx.cwd,
     base: ctx.host.base,
@@ -816,6 +817,7 @@ const recheckOpen = async (ctx: Ctx, label: string, touched: readonly string[]):
     })
     .filter((job) => job.testFiles.length > 0);
   if (jobs.length === 0) return undefined;
+  ctx.host.log(`re-check ${label}: ${jobs.length} open mutant(s) run`);
   const startedAt = Date.now();
   const batch = await runSoloJobs({ cwd: ctx.cwd, runId: ctx.runId }, jobs);
   if (!batch.ok) return `The re-check ${label} failed: ${batch.reason}`;

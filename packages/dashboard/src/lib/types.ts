@@ -236,6 +236,7 @@ export type TestsView = {
   planned: PlannedMutant[];
   mutants: MutantEvent[];
   gates: GateMark[];
+  activity: { at: string; text: string } | null;
 };
 
 export type StreamEvent = {
