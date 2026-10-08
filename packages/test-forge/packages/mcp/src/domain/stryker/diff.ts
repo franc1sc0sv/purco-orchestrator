@@ -18,9 +18,20 @@ const NON_PRODUCTION_PATTERNS: readonly RegExp[] = [
   /(?:^|[/])\.test-forge[/]/,
 ];
 
+const WIRING_PATTERNS: readonly RegExp[] = [
+  /\.module\.ts$/,
+  /\.router\.ts$/,
+  /\.output\.schema\.ts$/,
+  /(?:^|[/])dtos[/]outputs[/]/,
+];
+
 export const isProductionSource = (path: string): boolean =>
   MUTATED_EXTENSION.test(path) &&
   !NON_PRODUCTION_PATTERNS.some((pattern) => pattern.test(path));
+
+export const isMutationTarget = (path: string): boolean =>
+  isProductionSource(path) &&
+  !WIRING_PATTERNS.some((pattern) => pattern.test(path));
 
 export const isTestFile = (path: string): boolean => TEST_FILE.test(path);
 

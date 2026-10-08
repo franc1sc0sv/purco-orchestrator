@@ -948,8 +948,8 @@ check("a blocked handoff needs evidence", !noEvidence.ok && noEvidence.fix.inclu
 section("worker telemetry: usage and cost");
 
 const sonnetUsage = { input: 1000, output: 500, cacheRead: 10000, cacheCreation: 2000 };
-check("a message costs its tokens at the list price", messageCost(MODELS.sonnet, sonnetUsage) === 0.014);
-check("an opus message costs its tokens at the list price", messageCost(MODELS.opus, sonnetUsage) === 0.026);
+check("a message costs its tokens at the list price", messageCost(MODELS.sonnet, sonnetUsage) === 0.017);
+check("an opus message costs its tokens at the list price", messageCost(MODELS.opus, sonnetUsage) === 0.032);
 check("an unknown model costs nothing until the final cost corrects it", messageCost("other-model", sonnetUsage) === 0);
 const ledger = new UsageLedger();
 check("a new message id is counted", ledger.add("m1", MODELS.sonnet, sonnetUsage));

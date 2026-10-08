@@ -774,7 +774,7 @@ export class Orchestrator {
               : undefined,
           }),
           forwardSubagentText: true,
-          includePartialMessages: false,
+          includePartialMessages: true,
           abortController: controller,
           maxTurns,
           effort: effortFor(spec, this.size),

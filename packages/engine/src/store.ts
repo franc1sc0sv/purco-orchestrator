@@ -508,6 +508,19 @@ export class Store {
            set ticket = excluded.ticket, ended_at = null, status = 'running'`,
       )
       .run(this.runId, ticket, new Date().toISOString());
+    this.haltOrphanWorkers();
+  }
+
+  private haltOrphanWorkers(): void {
+    const ended = ENDED_STATES.map((state) => `'${state}'`).join(", ");
+    this.db
+      .prepare(
+        `update workers
+            set state = 'halted', action = '', ended_at = ?,
+                halt_reason = 'the run process stopped before this worker ended'
+          where run_id = ? and state not in (${ended})`,
+      )
+      .run(new Date().toISOString(), this.runId);
   }
 
   endRun(status: string): void {

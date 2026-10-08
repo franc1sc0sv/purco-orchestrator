@@ -87,6 +87,16 @@ const targetOf = (input: Record<string, unknown>): { key: string; value: string 
   return undefined;
 };
 
+const COMMAND_LIMIT = 8000;
+
+const fullTargetOf = (input: Record<string, unknown>): string => {
+  for (const key of INPUT_TARGET_KEYS) {
+    const value = input?.[key];
+    if (typeof value === "string" && value.length > 0) return value.slice(0, COMMAND_LIMIT);
+  }
+  return "";
+};
+
 export const describeInput = (input: Record<string, unknown>): string => {
   const target = targetOf(input);
   return target ? `${target.key}=${target.value}` : "";
@@ -180,7 +190,7 @@ export const buildHooks = (deps: {
       {
         toolUseId,
         tool: input.tool_name,
-        cmd: targetOf(toolInput)?.value ?? "",
+        cmd: fullTargetOf(toolInput),
         why: whyOf(input.tool_name, toolInput),
       },
     );

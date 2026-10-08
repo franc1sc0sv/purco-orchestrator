@@ -246,6 +246,7 @@ export type StreamEvent = {
   kind: string;
   tool?: string;
   cmd?: string;
+  toolUseId?: string;
   why?: string;
   ms?: number;
   ok?: boolean;

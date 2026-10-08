@@ -101,6 +101,7 @@ export type StreamEvent = {
   kind: string;
   tool?: string;
   cmd?: string;
+  toolUseId?: string;
   why?: string;
   ms?: number;
   ok?: boolean;
@@ -359,6 +360,7 @@ const toStreamEvent = (row: StoredStreamEvent): StreamEvent => {
       ...event,
       tool: typeof data.tool === "string" ? data.tool : undefined,
       cmd: typeof data.cmd === "string" ? data.cmd : undefined,
+      toolUseId: typeof data.toolUseId === "string" ? data.toolUseId : undefined,
       why: typeof data.why === "string" && data.why.length > 0 ? data.why : undefined,
       ms: typeof data.ms === "number" ? data.ms : undefined,
       ok: typeof data.ok === "boolean" ? data.ok : undefined,

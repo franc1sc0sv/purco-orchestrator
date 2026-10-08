@@ -60,6 +60,7 @@ export class WorkerMeter {
   private lastSampleMs = 0;
   private stateBeforeWait: WorkerState = "thinking";
   private authoritative = false;
+  private streaming: { id: string; model: string } | undefined;
 
   constructor(deps: MeterDeps, init: MeterInit) {
     this.deps = deps;
@@ -160,8 +161,26 @@ export class WorkerMeter {
     this.row.contextTokens = totals.contextTokens;
   }
 
+  private onStreamEvent(event: { type: string; message?: { id: string; model: string }; usage?: unknown }): void {
+    if (event.type === "message_start" && event.message !== undefined) {
+      this.streaming = { id: event.message.id, model: event.message.model };
+      return;
+    }
+    if (event.type !== "message_delta" || this.streaming === undefined || event.usage === undefined) return;
+    const changed = this.ledger.add(this.streaming.id, this.streaming.model, readUsage(event.usage));
+    if (!changed || this.authoritative) return;
+    this.applyTotals();
+    this.touch(false);
+    this.save();
+    this.sample(false);
+  }
+
   onMessage(message: SDKMessage): void {
     if (this.isEnded()) return;
+    if (message.type === "stream_event") {
+      this.onStreamEvent(message.event as Parameters<WorkerMeter["onStreamEvent"]>[0]);
+      return;
+    }
     if (message.type === "assistant") {
       const inner = message.message;
       const changed = this.ledger.add(inner.id, inner.model, readUsage(inner.usage));

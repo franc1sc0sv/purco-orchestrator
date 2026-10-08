@@ -3,7 +3,7 @@ import type { StreamEvent, Worker } from "@/lib/types";
 export const LANES = ["Bash", "Read", "Edit", "MCP", "Other"] as const;
 export type Lane = (typeof LANES)[number];
 
-export type CommandStatus = "running" | "ok" | "failed";
+export type CommandStatus = "running" | "ok" | "failed" | "lost";
 
 export type Command = {
   at: number;
@@ -36,9 +36,10 @@ export const shortTarget = (cmd: string): string => {
 export const eventsOfWorker = (events: StreamEvent[], worker: Worker): StreamEvent[] =>
   events.filter((event) => event.agent === worker.label || event.agent === worker.id);
 
-export const commandsOf = (events: StreamEvent[]): Command[] => {
+export const commandsOf = (events: StreamEvent[], ended = false): Command[] => {
   const commands: Command[] = [];
   const pending = new Map<string, Command[]>();
+  const byId = new Map<string, Command>();
   for (const event of events) {
     if (event.tool === undefined) continue;
     const at = Date.parse(event.at);
@@ -52,9 +53,13 @@ export const commandsOf = (events: StreamEvent[]): Command[] => {
         lane: laneOf(event.tool),
       };
       commands.push(command);
-      pending.set(event.tool, [...(pending.get(event.tool) ?? []), command]);
+      if (event.toolUseId !== undefined) byId.set(event.toolUseId, command);
+      else pending.set(event.tool, [...(pending.get(event.tool) ?? []), command]);
     } else if (event.kind === "tool_result" || event.kind === "tool_error") {
-      const open = pending.get(event.tool)?.shift();
+      const open =
+        event.toolUseId !== undefined && byId.has(event.toolUseId)
+          ? byId.get(event.toolUseId)
+          : pending.get(event.tool)?.shift();
       const status: CommandStatus = event.ok === false ? "failed" : "ok";
       if (open) {
         open.ms = event.ms ?? at - open.at;
@@ -65,7 +70,8 @@ export const commandsOf = (events: StreamEvent[]): Command[] => {
       }
     }
   }
-  return commands;
+  if (!ended) return commands;
+  return commands.map((command) => (command.status === "running" ? { ...command, status: "lost" } : command));
 };
 
 export const nowDoing = (events: StreamEvent[]): Command | undefined => {

@@ -1,5 +1,5 @@
 import {
-  isProductionSource,
+  isMutationTarget,
   isTestFile,
   parseChangedLines,
   wholeFileRange,
@@ -136,7 +136,7 @@ export const resolveScope = async ({
   const changed = await changedLinesOf(root, mergeBase);
   const allowed = files === undefined ? null : new Set(files);
   const productionFiles = Object.keys(changed)
-    .filter(isProductionSource)
+    .filter(isMutationTarget)
     .filter((path) => allowed === null || allowed.has(path))
     .filter((path) => existsOnDisk(root, path))
     .sort();

@@ -14,10 +14,10 @@ import {
   type CommandStatus,
 } from "@/lib/agent-activity";
 import { postNote } from "@/lib/api";
-import { WORKER_LABEL, WORKER_TONE, isWorkerBusy } from "@/lib/colors";
+import { WORKER_LABEL, WORKER_TONE, isWorkerBusy, isWorkerLive } from "@/lib/colors";
 import { clock, formatDuration, formatTokens, shortModel } from "@/lib/format";
 import { buildCells } from "@/lib/mutants";
-import type { StreamEvent, TestsView, Worker } from "@/lib/types";
+import type { StreamEvent, TestsView, Worker, WorkerState } from "@/lib/types";
 
 const WINDOW_MS = 10 * 60 * 1000;
 const LOG_ROWS = 20;
@@ -32,21 +32,41 @@ const RESULT_CHIP: Record<CommandStatus, "outline" | "secondary" | "default"> = 
   running: "outline",
   ok: "secondary",
   failed: "default",
+  lost: "outline",
 };
 
 const resultText = (command: Command): string => {
   if (command.status === "running") return "running";
+  if (command.status === "lost") return "no result";
   const label = command.status === "ok" ? "ok" : "failed";
   return command.ms === null ? label : `${label} · ${formatMs(command.ms)}`;
 };
 
+const idleTitle = (state: WorkerState, lastAt: number | undefined, now: number): string => {
+  if (!isWorkerLive(state)) return `Ended · ${WORKER_LABEL[state]}`;
+  if (!isWorkerBusy(state)) return WORKER_LABEL[state];
+  if (lastAt === undefined) return "Starting";
+  return `Thinking · ${formatDuration(Math.max(0, now - lastAt))} since the last tool call`;
+};
+
+const FullCommand = ({ cmd }: { cmd: string }) =>
+  cmd.length === 0 ? null : (
+    <pre className="max-h-72 overflow-auto rounded-md bg-black/25 p-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
+      {cmd}
+    </pre>
+  );
+
 const NowRunning = ({
   command,
+  state,
+  lastAt,
   tests,
   events,
   now,
 }: {
   command: Command | undefined;
+  state: WorkerState;
+  lastAt: number | undefined;
   tests: TestsView;
   events: StreamEvent[];
   now: number;
@@ -55,12 +75,13 @@ const NowRunning = ({
   return (
     <div className="bg-primary text-primary-foreground grid gap-1 rounded-lg px-4 py-3">
       <span className="text-xs font-semibold tracking-wider uppercase opacity-80">
-        {command ? `Now running · ${formatDuration(Math.max(0, now - command.at))}` : "Nothing is running"}
+        {command ? `Now running · ${formatDuration(Math.max(0, now - command.at))}` : idleTitle(state, lastAt, now)}
       </span>
       {command ? (
-        <span className="font-mono text-sm break-all">
-          {toolLabel(command.tool)} {command.cmd}
-        </span>
+        <>
+          <span className="text-sm font-semibold">{toolLabel(command.tool)}</span>
+          <FullCommand cmd={command.cmd} />
+        </>
       ) : null}
       {mutant ? (
         <span className="font-mono text-xs break-all opacity-90">
@@ -126,8 +147,10 @@ export const AgentPanel = ({
   now: number;
   closeHref: string;
 }) => {
-  const commands = commandsOf(events);
+  const commands = commandsOf(events, !isWorkerLive(worker.state));
   const current = commands.filter((command) => command.status === "running").pop();
+  const last = commands.at(-1);
+  const lastAt = last === undefined ? undefined : last.at + (last.ms ?? 0);
   const tokens = worker.tokensIn + worker.tokensOut + worker.cacheWrite;
   const minutes = Math.max(1 / 6, (now - Date.parse(worker.startedAt)) / 60_000);
   const tone = WORKER_TONE[worker.state];
@@ -150,7 +173,7 @@ export const AgentPanel = ({
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="grid gap-5 p-4">
-          <NowRunning command={current} tests={tests} events={events} now={now} />
+          <NowRunning command={current} state={worker.state} lastAt={lastAt} tests={tests} events={events} now={now} />
           <div className="grid grid-cols-2 gap-3">
             <Stat label="Tokens" value={formatTokens(tokens)} sub={`${formatTokens(tokens / minutes)} per min`} />
             <Stat label="Turns" value={String(worker.turns)} sub={worker.maxTurns > 0 ? `of ${worker.maxTurns}` : "no limit"} />
@@ -167,16 +190,21 @@ export const AgentPanel = ({
                 .slice(-LOG_ROWS)
                 .reverse()
                 .map((command) => (
-                  <div key={`${command.at}-${command.tool}`} className="flex items-center gap-2 text-sm">
-                    <span className="text-muted-foreground font-mono text-xs">{clock(new Date(command.at).toISOString())}</span>
-                    <span className="font-semibold">{toolLabel(command.tool)}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs" title={command.cmd}>
-                      {shortTarget(command.cmd)}
-                    </span>
-                    <Badge variant={RESULT_CHIP[command.status]} className="shrink-0 font-mono">
-                      {resultText(command)}
-                    </Badge>
-                  </div>
+                  <details key={`${command.at}-${command.tool}`} className="group text-sm">
+                    <summary className="flex cursor-pointer list-none items-center gap-2">
+                      <span className="text-muted-foreground font-mono text-xs">{clock(new Date(command.at).toISOString())}</span>
+                      <span className="font-semibold">{toolLabel(command.tool)}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs group-open:invisible">
+                        {shortTarget(command.cmd)}
+                      </span>
+                      <Badge variant={RESULT_CHIP[command.status]} className="shrink-0 font-mono">
+                        {resultText(command)}
+                      </Badge>
+                    </summary>
+                    <div className="mt-1.5 mb-2">
+                      <FullCommand cmd={command.cmd} />
+                    </div>
+                  </details>
                 ))}
             </div>
           </div>
