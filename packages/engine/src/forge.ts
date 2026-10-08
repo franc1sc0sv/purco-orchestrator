@@ -171,6 +171,7 @@ type Ctx = {
   proofs: Record<string, number[]>;
   emitted: Map<number, string>;
   planned: boolean;
+  hunted: Set<number>;
   inspected: Map<string, string>;
   mapperRan: boolean;
   failure: string | undefined;
@@ -405,6 +406,7 @@ const prepare = async (host: ForgeHost): Promise<Ctx | string> => {
     proofs: {},
     emitted: new Map(),
     planned: false,
+    hunted: new Set(),
     inspected: new Map(),
     mapperRan: false,
     failure: undefined,
@@ -1119,7 +1121,8 @@ const huntSurvivors = async (ctx: Ctx, round: number): Promise<Map<string, strin
   });
   const claimed = mutants(ctx, ["equivalent-claimed"]);
   await inBatches([...groupBy(claimed, (mutant) => mutant.file_path)], async ([source, group]) => {
-    await ctx.host.spawn({
+    const ids = group.map((mutant) => mutant.id);
+    const outcome = await ctx.host.spawn({
       role: "equivalence-hunter",
       name: `claims-${round}:${path.basename(source)}`,
       task: [
@@ -1127,10 +1130,22 @@ const huntSurvivors = async (ctx: Ctx, round: number): Promise<Map<string, strin
         "",
         engagement(ctx, [
           `- the production file: ${source}`,
-          `- the claimed mutant ids: ${group.map((mutant) => mutant.id).join(", ")}`,
+          `- the claimed mutant ids: ${ids.join(", ")}`,
+          "- record a refutation with the exact claimedBy and argument of the claim in <claims>",
         ]),
       ].join("\n"),
+      parts: [
+        tagged(
+          "claims",
+          JSON.stringify(
+            claimRows(ids).map((claim) => ({ mutantId: claim.mutant_id, claimedBy: claim.claimed_by, argument: claim.argument })),
+            null,
+            2,
+          ),
+        ),
+      ],
     });
+    if (outcome.status === "done") for (const id of ids) ctx.hunted.add(id);
   });
 
   const hints = new Map<number, string>();
@@ -1157,7 +1172,7 @@ const huntSurvivors = async (ctx: Ctx, round: number): Promise<Map<string, strin
 };
 
 const signEquivalences = async (ctx: Ctx): Promise<void> => {
-  const pending = mutants(ctx, ["equivalent-claimed"]);
+  const pending = mutants(ctx, ["equivalent-claimed"]).filter((mutant) => ctx.hunted.has(mutant.id));
   const claims = claimRows(pending.map((mutant) => mutant.id));
   if (claims.length === 0) return;
   const rows = new Map(ledgerMutants(ctx.runId).map((row) => [row.id, row]));

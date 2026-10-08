@@ -63,6 +63,19 @@ const TARGETS_FILE = /^targets-[\w.-]+\.json$/;
 const isTargetsFile = (resolved: string, forgeDir: string): boolean =>
   resolved.startsWith(path.resolve(forgeDir) + path.sep) && TARGETS_FILE.test(path.basename(resolved));
 
+const HOLES_FILE = /^holes-[\w.-]+\.json$/;
+
+export const forgeWriteRefusal = (tool: string, input: Record<string, unknown>, forgeDir: string): string | undefined => {
+  if (!WRITING_TOOLS.has(tool)) return undefined;
+  const target = String(input.file_path ?? input.notebook_path ?? "");
+  const resolved = path.resolve(forgeDir, target);
+  const allowed =
+    !target.includes("..") &&
+    resolved.startsWith(path.resolve(forgeDir) + path.sep) &&
+    HOLES_FILE.test(path.basename(resolved));
+  return allowed ? undefined : `This role writes only its holes-*.json file in ${forgeDir}. "${target}" is refused.`;
+};
+
 export const testWriteRefusal = (
   tool: string,
   input: Record<string, unknown>,

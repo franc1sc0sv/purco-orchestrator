@@ -34,7 +34,7 @@ import {
 } from "./size.ts";
 import { runForge, type ForgeJob, type ForgeResult } from "./forge.ts";
 import { FORGE_SERVER, FORGE_SERVER_NAME } from "./forge-server.ts";
-import { testWriteRefusal } from "./test-paths.ts";
+import { forgeWriteRefusal, testWriteRefusal } from "./test-paths.ts";
 import {
   describeWriteViolation,
   diffWriteSnapshots,
@@ -774,7 +774,9 @@ export class Orchestrator {
                 : undefined,
             refuse: spec.testFilesOnly
               ? (tool, input) => testWriteRefusal(tool, input, this.config.worktree, path.join(this.config.contextPack, "forge"))
-              : undefined,
+              : spec.forgeFilesOnly
+                ? (tool, input) => forgeWriteRefusal(tool, input, path.join(this.config.contextPack, "forge"))
+                : undefined,
           }),
           forwardSubagentText: true,
           includePartialMessages: true,

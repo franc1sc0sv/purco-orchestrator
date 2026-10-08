@@ -59,6 +59,7 @@ export type RoleSpec = {
   needsSpike?: boolean;
   needsForge?: boolean;
   testFilesOnly?: boolean;
+  forgeFilesOnly?: boolean;
   effort: "low" | "medium" | "high" | "xhigh" | "max";
   maxTurns: number;
 };
@@ -294,9 +295,11 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
       "Reads the surviving mutants of one production file and files an equivalence claim, or names the coverage hole a new test must close.",
     tools: [
       ...AUDIT_TOOLS,
+      "Write",
       ...forgeTools("mutation_survivors", "mutation_equivalence_record", "ast_file_facts"),
     ],
-    writes: false,
+    writes: true,
+    forgeFilesOnly: true,
     needsForge: true,
     effort: "medium",
     maxTurns: 60,
