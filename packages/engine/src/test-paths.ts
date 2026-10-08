@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 
 const TEST_PATH = new RegExp(
@@ -58,6 +59,28 @@ const runsGit = (command: string): boolean => {
   return [...command.matchAll(SHELL_STRING)].some((match) => runsGit(match[2] ?? match[4] ?? ""));
 };
 
+const REDIRECT = /(?:^|[^<>&0-9])[0-9]?>{1,2}\s*(["']?)([^\s;&|<>()"']+)\1/g;
+const FILE_WRITERS = new Set(["tee", "cp", "mv", "rm", "touch", "truncate", "install", "ln", "rsync"]);
+const LAST_ARGUMENT_WRITERS = new Set(["cp", "mv", "install", "ln", "rsync"]);
+const IN_PLACE_EDITORS = new Set(["sed", "gsed", "perl"]);
+const TEMPORARY_ROOTS = [os.tmpdir(), "/tmp", "/private/tmp"].map((root) => path.resolve(root) + path.sep);
+
+const writeTargets = (command: string): string[] => {
+  const targets = [...command.matchAll(REDIRECT)].map((match) => match[2] ?? "");
+  for (const segment of command.split(SEGMENT_SPLIT)) {
+    const words = segment.trim().split(/\s+/).filter((word) => word.length > 0).map(bare);
+    const base = (words[0] ?? "").split("/").pop() ?? "";
+    const args = words.slice(1).filter((word) => word.length > 0 && !word.startsWith("-"));
+    if (FILE_WRITERS.has(base)) targets.push(...(LAST_ARGUMENT_WRITERS.has(base) ? args.slice(-1) : args));
+    if (IN_PLACE_EDITORS.has(base) && words.some((word) => /^-[a-zA-Z]*i/.test(word) || word === "--in-place")) {
+      targets.push(...args.slice(1));
+    }
+    const output = words.find((word) => word.startsWith("of="));
+    if (output) targets.push(output.slice(3));
+  }
+  return targets.filter((target) => target.length > 0 && !target.startsWith("/dev/"));
+};
+
 const TARGETS_FILE = /^targets-[\w.-]+\.json$/;
 
 const isTargetsFile = (resolved: string, forgeDir: string): boolean =>
@@ -76,6 +99,13 @@ export const forgeWriteRefusal = (tool: string, input: Record<string, unknown>, 
   return allowed ? undefined : `This role writes only its holes-*.json file in ${forgeDir}. "${target}" is refused.`;
 };
 
+const mayWrite = (target: string, root: string, forgeDir: string | undefined): boolean => {
+  const resolved = path.resolve(root, target);
+  if (TEMPORARY_ROOTS.some((prefix) => resolved.startsWith(prefix))) return true;
+  if (forgeDir !== undefined && isTargetsFile(resolved, forgeDir) && !target.includes("..")) return true;
+  return resolved.startsWith(path.resolve(root) + path.sep) && isTestPath(resolved);
+};
+
 export const testWriteRefusal = (
   tool: string,
   input: Record<string, unknown>,
@@ -84,7 +114,11 @@ export const testWriteRefusal = (
 ): string | undefined => {
   if (tool === "Bash") {
     const command = typeof input.command === "string" ? input.command : "";
-    return runsGit(command) ? "A test author never runs git." : undefined;
+    if (runsGit(command)) return "A test author never runs git.";
+    const refused = writeTargets(command).find((target) => !mayWrite(target, root, forgeDir));
+    return refused === undefined
+      ? undefined
+      : `A test author writes test files only. The command writes "${refused}": write test files with Write or Edit.`;
   }
   if (!WRITING_TOOLS.has(tool)) return undefined;
   const target = String(input.file_path ?? input.notebook_path ?? "");
