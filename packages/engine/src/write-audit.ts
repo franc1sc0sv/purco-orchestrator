@@ -154,11 +154,17 @@ const readState = (absolute: string): { state: string; bytes?: Buffer } => {
   return { state: `${hashOf(bytes)}:${(stat.mode & 0o777).toString(8)}`, bytes };
 };
 
+const FORGE_WORK_PREFIX = ".test-forge/";
+
 export const takeWriteSnapshot = (root: string): WriteSnapshot => {
   const gitDir = commonGitDir(root);
   const states = new Map<string, string>();
   const contents = new Map<string, Buffer>();
-  const keys = new Set([...statusPaths(root), ...ignoredPaths(root), ...gitInternalPaths(gitDir)]);
+  const keys = new Set(
+    [...statusPaths(root), ...ignoredPaths(root), ...gitInternalPaths(gitDir)].filter(
+      (key) => !key.startsWith(FORGE_WORK_PREFIX),
+    ),
+  );
   for (const key of keys) {
     const { state, bytes } = readState(locate(root, gitDir, key));
     states.set(key, state);
