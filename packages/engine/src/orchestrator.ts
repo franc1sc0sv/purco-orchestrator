@@ -1078,6 +1078,7 @@ export class Orchestrator {
         scope: this.config.testScope,
         depth: this.testDepth(),
         mode: this.testMode(),
+        strict: this.config.testStrict === true,
         size: this.config.workflow === "ticket" ? this.size : undefined,
         targets: this.config.testTargets,
         focus: step.fix ? `Confirm the fixes for:\n${step.fix}` : this.config.testFocus,

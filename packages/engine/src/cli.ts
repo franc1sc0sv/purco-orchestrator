@@ -41,6 +41,9 @@ purco-orchestrate monitor [--port <n>]
                        existing tests of the changed files and adds tests only for
                        survivors. A test-mode.txt file in the context pack sets it
                        per ticket
+  --test-strict        test step: also run the inspectors, the code-rule gate, the
+                       polish rounds, the equivalence hunter and the signatures.
+                       Default: lean (mutants, authors, re-check, cleanup, done)
   --worktree <path>    default: the worktree whose branch matches the ticket
   --model <id>         override every role's model; default is per role
   --resume             skip every phase this run already finished
@@ -211,6 +214,7 @@ const main = async (): Promise<void> => {
         : undefined,
     testDepthExplicit:
       flags["test-depth"] === "quick" || flags["test-depth"] === "full",
+    testStrict: flags["test-strict"] === true,
   };
 
   process.stderr.write(

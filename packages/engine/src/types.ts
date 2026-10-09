@@ -245,6 +245,7 @@ export type RunConfig = {
   testScope?: "backend" | "frontend";
   testDepth: "full" | "quick";
   testMode?: "write" | "harden";
+  testStrict?: boolean;
   testDepthExplicit: boolean;
 };
 

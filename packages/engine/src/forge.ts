@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { cpus, homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PredicateId, WorkItem } from "test-forge-contracts/gates";
+import type { PredicateId, PredicateKey, WorkItem } from "test-forge-contracts/gates";
 import type { MutationPassResult } from "test-forge-contracts/stryker";
 import { astCheckBatch } from "test-forge-mcp-server/src/application/analysis/check-batch.ts";
 import { rulesFor, type ApplicableRule } from "test-forge-mcp-server/src/application/codex/rules-for.ts";
@@ -122,6 +122,7 @@ export type ForgeHost = {
   scope?: ForgeScope;
   depth: "full" | "quick";
   mode?: TestMode;
+  strict?: boolean;
   size?: Size;
   targets?: string;
   focus?: string;
@@ -1384,12 +1385,12 @@ const mutationStage = async (ctx: Ctx): Promise<string | undefined> => {
     if (work.size === 0) break;
     const failure = await killRound(ctx, `round-${round}`, work);
     if (failure) return failure;
-    await huntClaims(ctx, round);
+    if (ctx.host.strict) await huntClaims(ctx, round);
     const after = progress();
     if (after === before) break;
     before = after;
   }
-  await signEquivalences(ctx);
+  if (ctx.host.strict) await signEquivalences(ctx);
   return undefined;
 };
 
@@ -1566,6 +1567,37 @@ const close = async (
   };
 };
 
+const LEAN_PREDICATES: readonly PredicateKey[] = ["d1", "d3", "d4"];
+
+const leanClose = async (ctx: Ctx): Promise<ForgeResult> => {
+  const gates = await evaluate(ctx, true);
+  const failing = LEAN_PREDICATES.filter((id) => !gates.predicates[id]).map((id) => id.toUpperCase());
+  const blocker = ctx.failure ?? (failing.length > 0 ? `the new tests do not pass: failing ${failing.join(", ")}` : undefined);
+  const open = unresolvedMutants(ledgerMutants(ctx.runId));
+  const reason = [
+    blocker,
+    open.length > 0
+      ? `${open.length} mutant(s) left for review: ${listOf(open.map((mutant) => `M${mutant.id} ${spanOf(mutant)} ${mutant.mutator} ${mutant.outcome}`))}`
+      : "every in-scope mutant has a final state",
+    `mutants: ${countsText(ledgerMutants(ctx.runId))}`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+  writeReport(ctx, blocker);
+  const exitKind = blocker === undefined ? "DONE" : "BLOCKED";
+  await runEnd({ cwd: ctx.cwd, runId: ctx.runId, exitKind, exitReason: reason });
+  const defects = (await state({ cwd: ctx.cwd, runId: ctx.runId })).findings
+    .filter((finding) => finding.status === "confirmed-defect")
+    .map((finding) => ({ findingKey: finding.findingKey, title: finding.title }));
+  return {
+    status: exitKind === "DONE" ? "done" : "escalated",
+    summary: `Test Forge run ${ctx.runId} (${ctx.scope}, lean) ${exitKind}: ${reason}. ${defects.length} confirmed defect(s) for the builder.`,
+    runId: ctx.runId,
+    scope: ctx.scope,
+    defects,
+  };
+};
+
 const flow = async (ctx: Ctx): Promise<ForgeResult> => {
   const resolved = await resolveScope({ cwd: ctx.cwd, base: ctx.host.base });
   if (!resolved.ok) return close(ctx, { blocker: `The mutation scope could not be set: ${resolved.reason}` });
@@ -1615,6 +1647,7 @@ const flow = async (ctx: Ctx): Promise<ForgeResult> => {
   try {
     const blocker = await mutationStage(ctx);
     if (blocker) return close(ctx, { blocker });
+    if (!ctx.host.strict) return await leanClose(ctx);
     const gates = await finish(ctx);
     return close(ctx, { blocker: finalBlocker(ctx), gates });
   } finally {
@@ -1661,6 +1694,6 @@ const runScope = async (host: ForgeHost): Promise<ForgeResult> => {
     return { status: "escalated", summary: `refused: ${prepared}`, runId: null, scope: null, defects: [], refusal: prepared };
   }
   const ctx = prepared;
-  host.log(`Test Forge run ${ctx.runId} (${ctx.scope}, ${host.depth}, ${ctx.mode})`);
+  host.log(`Test Forge run ${ctx.runId} (${ctx.scope}, ${host.depth}, ${ctx.mode}, ${host.strict ? "strict" : "lean"})`);
   return flow(ctx);
 };
