@@ -872,7 +872,7 @@ export class Store {
           )
           .run(held.runId);
       }
-      if (held) this.expireOrphanQuestions(at);
+      this.expireOrphanQuestions(at);
       this.db
         .prepare(
           `insert into leases (ticket, run_id, pid, host, heartbeat_at, started_at)
