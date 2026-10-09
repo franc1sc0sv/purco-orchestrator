@@ -117,7 +117,7 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
   fixer: {
     role: "fixer",
     phase: "static",
-    model: MODELS.sonnet,
+    model: MODELS.haiku,
     description:
       "Runs yarn static and fixes only what this branch broke. Adds nothing, refactors nothing, suppresses nothing.",
     tools: WRITE_TOOLS,
@@ -201,7 +201,7 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
   },
   mapper: {
     role: "mapper",
-    model: MODELS.sonnet,
+    model: MODELS.haiku,
     phase: "test",
     description:
       "Names the test file of each production file that has none, following the repository's test layout. Writes no test.",

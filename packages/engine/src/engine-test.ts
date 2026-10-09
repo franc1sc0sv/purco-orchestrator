@@ -637,12 +637,9 @@ check(
 );
 check("static no longer runs as the builder", PHASE_ROLE.static === "fixer");
 check(
-  "every role runs on Opus 5.5 or Sonnet 5.5",
-  ROLES.every((role) =>
-    [MODELS.opus, MODELS.sonnet].some((model) => model === ROLE_SPECS[role].model),
-  ),
+  "every role runs on a current model",
+  ROLES.every((role) => Object.values(MODELS).some((model) => model === ROLE_SPECS[role].model)),
 );
-check("the fixer runs on sonnet", ROLE_SPECS.fixer.model === MODELS.sonnet);
 check("the fixer runs at low effort", ROLE_SPECS.fixer.effort === "low");
 check("the fixer has a small turn budget", ROLE_SPECS.fixer.maxTurns <= 30);
 check("the planner stays on opus", ROLE_SPECS.planner.model === MODELS.opus);
