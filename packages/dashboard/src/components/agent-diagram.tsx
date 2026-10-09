@@ -62,6 +62,8 @@ const Anchors = () => (
   <>
     <Handle type="target" position={Position.Left} style={hidden} />
     <Handle type="source" position={Position.Right} style={hidden} />
+    <Handle id="top" type="target" position={Position.Top} style={hidden} />
+    <Handle id="bottom" type="source" position={Position.Bottom} style={hidden} />
   </>
 );
 
@@ -317,6 +319,16 @@ const buildGraph = (
         animated: busy && !stuck,
         style: { stroke: TONES[tone].color, strokeWidth: 2, opacity: busy ? 1 : 0.5 },
       });
+      const nodeIdOf = (item: FlowItem): string =>
+        item.kind === "worker" ? `worker:${item.worker.id}` : `job:${item.job.id}`;
+      const down = (row: number, target: string) => ({
+        id: `${row === 0 ? phaseId : nodeIdOf(phase.items[row - 1] as FlowItem)}->${target}`,
+        source: row === 0 ? phaseId : nodeIdOf(phase.items[row - 1] as FlowItem),
+        sourceHandle: "bottom",
+        target,
+        targetHandle: "top",
+        type: "straight",
+      });
       phase.items.forEach((item, row) => {
         const y = cursor + PHASE_HEADER + row * ROW_HEIGHT;
         if (item.kind === "worker") {
@@ -335,7 +347,7 @@ const buildGraph = (
             },
             draggable: false,
           } satisfies WorkerNode);
-          edges.push({ id: `${phaseId}->${worker.id}`, source: phaseId, target: `worker:${worker.id}`, ...workerEdge(worker, live, stuck) });
+          edges.push({ ...down(row, `worker:${worker.id}`), ...workerEdge(worker, live, stuck) });
           return;
         }
         const { job } = item;
@@ -357,9 +369,7 @@ const buildGraph = (
           draggable: false,
         } satisfies JobNode);
         edges.push({
-          id: `${phaseId}->job:${job.id}`,
-          source: phaseId,
-          target: `job:${job.id}`,
+          ...down(row, `job:${job.id}`),
           animated: jobBusy && !stuck,
           style: { stroke: TONES[jobTone].color, strokeWidth: 2, strokeDasharray: TONES[jobTone].dash, opacity: jobBusy ? 1 : 0.3 },
         });
