@@ -154,7 +154,7 @@ const readState = (absolute: string): { state: string; bytes?: Buffer } => {
   return { state: `${hashOf(bytes)}:${(stat.mode & 0o777).toString(8)}`, bytes };
 };
 
-const FORGE_WORK_PREFIX = ".test-forge/";
+const FORGE_WORK_PREFIX = ".test-forge/stryker-run/";
 
 export const takeWriteSnapshot = (root: string): WriteSnapshot => {
   const gitDir = commonGitDir(root);
