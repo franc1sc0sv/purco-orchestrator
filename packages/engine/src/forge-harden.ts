@@ -106,6 +106,14 @@ const testBlockOf = (content: string, name: string): { start: number; end: numbe
   return undefined;
 };
 
+const lineAt = (content: string, index: number): number => content.slice(0, index).split("\n").length;
+
+export const testLineRanges = (content: string, names: readonly string[]): [number, number][] =>
+  names.flatMap((name) => {
+    const block = testBlockOf(content, name);
+    return block ? [[lineAt(content, block.start), lineAt(content, block.end)] as [number, number]] : [];
+  });
+
 export const removeTests = (content: string, names: readonly string[]): { content: string; removed: string[] } =>
   names.reduce(
     (result, name) => {

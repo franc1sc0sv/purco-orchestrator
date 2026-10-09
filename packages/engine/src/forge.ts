@@ -63,6 +63,7 @@ import {
   protectedTestsOf,
   removedProtectedTests,
   removeTests,
+  testLineRanges,
   testNames,
   testOutline,
   type ExitDecision,
@@ -290,13 +291,17 @@ type JobKind = "harness" | "stryker" | "recheck" | "suite" | "solo" | "gates";
 
 let jobCount = 0;
 
-let soloChain: Promise<unknown> = Promise.resolve();
-
-const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
-  const next = soloChain.then(work);
-  soloChain = next.catch(() => undefined);
-  return next;
+const chainOf = (): (<T>(work: () => Promise<T>) => Promise<T>) => {
+  let chain: Promise<unknown> = Promise.resolve();
+  return <T>(work: () => Promise<T>): Promise<T> => {
+    const next = chain.then(work);
+    chain = next.catch(() => undefined);
+    return next;
+  };
 };
+
+const exclusive = chainOf();
+const oneStryker = chainOf();
 
 const tracked = async <T>(
   ctx: Ctx,
@@ -461,9 +466,12 @@ const persistBaseline = (ctx: Ctx): void => {
   fs.writeFileSync(baselineFile(ctx), JSON.stringify(ctx.baseline, null, 2));
 };
 
+const inScope = (ctx: Ctx, file: string): boolean => projectKindOf(file) === ctx.scope;
+
 const loadBaseline = (ctx: Ctx): void => {
   if (!fs.existsSync(baselineFile(ctx))) return;
-  ctx.baseline = JSON.parse(fs.readFileSync(baselineFile(ctx), "utf8")) as TestBaseline;
+  const stored = JSON.parse(fs.readFileSync(baselineFile(ctx), "utf8")) as TestBaseline;
+  ctx.baseline = Object.fromEntries(Object.entries(stored).filter(([file]) => inScope(ctx, file)));
 };
 
 const snapshot = (ctx: Ctx, files: readonly string[]): void => {
@@ -474,7 +482,7 @@ const snapshot = (ctx: Ctx, files: readonly string[]): void => {
 };
 
 const mergeUnits = (ctx: Ctx, incoming: readonly Unit[]): void => {
-  for (const unit of incoming) {
+  for (const unit of incoming.filter((entry) => inScope(ctx, entry.file))) {
     const known = unitForFile(ctx.units, unit.file);
     if (known) {
       known.sources = [...new Set([...known.sources, ...unit.sources])];
@@ -670,7 +678,16 @@ const inspectMechanically = async (
       report?.checks.find((outcome) => outcome.checkId === rule.id),
     ),
   }));
-  const judgements = judged.flatMap(({ judgement }) => (judgement ? [judgement] : []));
+  const content = readWorktreeFile(ctx)(file);
+  const known = new Set(protectedTestsOf(ctx.baseline, file));
+  const ranges = testLineRanges(content, testNames(content).filter((name) => !known.has(name)));
+  const inNewTests = (line: number): boolean => ranges.some(([from, to]) => line >= from && line <= to);
+  const judgements = judged.flatMap(({ judgement }) => {
+    if (!judgement) return [];
+    if (judgement.verdict !== "violation") return [judgement];
+    const sites = judgement.sites.filter((site) => inNewTests(site.line));
+    return [sites.length > 0 ? { ...judgement, sites } : { ...judgement, verdict: "pass" as const, sites: [] }];
+  });
   const unjudged = judged.filter(({ judgement }) => !judgement).map(({ rule }) => rule);
   await recordMechanical(ctx, file, judgements);
   return [...plan.residual, ...unjudged];
@@ -929,7 +946,7 @@ const runPass = async (ctx: Ctx, label: string): Promise<string | undefined> => 
       testFiles,
     },
     () =>
-      mutationPass({
+      oneStryker(() => mutationPass({
         cwd: ctx.cwd,
         base: ctx.host.base,
         runId: ctx.runId,
@@ -939,7 +956,7 @@ const runPass = async (ctx: Ctx, label: string): Promise<string | undefined> => 
         keepHarness: true,
         onPlanned: () => publishPlan(ctx, ledgerMutants(ctx.runId)),
         onMutantTested: (tested) => publishTested(ctx, tested),
-      }),
+      })),
   );
   if (!result.ok) return `The mutation pass ${label} failed: ${result.reason}`;
   publish(ctx);
@@ -1051,10 +1068,16 @@ const failingTestWork = async (ctx: Ctx): Promise<Map<string, string[]>> => {
 
 const runBaseline = async (ctx: Ctx): Promise<string | undefined> => {
   let failingBefore = Number.POSITIVE_INFINITY;
+  let retriedFlaky = false;
   for (let attempt = 1; ; attempt += 1) {
     const failure = await runPass(ctx, attempt === 1 ? "baseline" : `baseline-${attempt}`);
     if (!failure || !INITIAL_RUN_FAILED.test(failure)) return failure;
     const work = await failingTestWork(ctx);
+    if (work.size === 0 && !retriedFlaky) {
+      retriedFlaky = true;
+      ctx.host.log("baseline: the failed tests pass alone, so the baseline runs one more time");
+      continue;
+    }
     if (work.size === 0 || work.size >= failingBefore) return failure;
     failingBefore = work.size;
     await write(ctx, work, `repair-${attempt}`);
@@ -1388,7 +1411,7 @@ const finish = async (ctx: Ctx): Promise<GatesEvaluation | undefined> => {
   let gates: GatesEvaluation | undefined;
   let previousWork = Number.POSITIVE_INFINITY;
   for (let attempt = 1; ; attempt += 1) {
-    const changed = changedTestFiles(ctx.baseline, read);
+    const changed = changedTestFiles(ctx.baseline, read).filter((file) => inScope(ctx, file));
     if (changed.length === 0) return gates;
     mergeUnits(ctx, changed.map((file) => ({ file, sources: [], rows: [], focusLines: [] })));
     await unitUpsertBatch({
