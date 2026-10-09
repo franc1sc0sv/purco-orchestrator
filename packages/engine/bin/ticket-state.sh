@@ -88,10 +88,24 @@ pr_json=$(gh pr list --head "$branch" --state all --limit 1 \
 pr_number=$(printf '%s' "$pr_json" | jq -r '.[0].number // empty')
 pr_base=$(printf '%s' "$pr_json" | jq -r '.[0].baseRefName // empty')
 
-base="${pr_base:-dev}"
+count() { git -C "$root" rev-list --count "$1" 2>/dev/null || echo 0; }
+
+stack_parent() {
+  gh pr list --state open --limit 200 --json headRefName,headRefOid 2>/dev/null |
+    jq -r '.[] | "\(.headRefOid) \(.headRefName)"' |
+    while read -r oid name; do
+      [ "$name" = "$branch" ] && continue
+      git -C "$root" merge-base --is-ancestor "$oid" HEAD 2>/dev/null || continue
+      git -C "$root" merge-base --is-ancestor "$oid" origin/dev 2>/dev/null && continue
+      git -C "$root" rev-parse --verify --quiet "origin/$name" >/dev/null 2>&1 || continue
+      echo "$(count "origin/dev..$oid") $name"
+    done | sort -rn | head -1 | cut -d' ' -f2-
+}
+
+base="${pr_base:-$(stack_parent)}"
+base="${base:-dev}"
 git -C "$root" rev-parse --verify --quiet "origin/$base" >/dev/null 2>&1 || base="dev"
 
-count() { git -C "$root" rev-list --count "$1" 2>/dev/null || echo 0; }
 ahead=$(count "origin/$base..HEAD")
 behind=$(count "HEAD..origin/$base")
 dirty=$(git -C "$root" status --porcelain 2>/dev/null | grep -c . || true)

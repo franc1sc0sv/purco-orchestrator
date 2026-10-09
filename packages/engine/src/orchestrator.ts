@@ -137,7 +137,7 @@ type GateVerdict =
   | { kind: "revise"; notes: string };
 
 const NO_RESULT = "no result";
-const BASE_BRANCH = "dev";
+const DEFAULT_BASE = "dev";
 const DASHBOARD_URL = "http://localhost:4317";
 
 const APPROVE = /^\s*(approve|approved|yes|y|ok|go|continue)\b/i;
@@ -181,6 +181,7 @@ export class Orchestrator {
   private readonly leadBacklog: string[] = [];
   private pools: Map<PgTenant, ReadOnlyPostgres> | undefined;
   private aborted = false;
+  private prBase: string | undefined;
   private stopReason = "";
   private leadCost = 0;
   private readonly store: Store | undefined;
@@ -519,6 +520,26 @@ export class Orchestrator {
     }
   }
 
+  private baseBranch(): string {
+    if (this.prBase !== undefined) return this.prBase;
+    this.prBase = DEFAULT_BASE;
+    if (!fs.existsSync(STATE_SCRIPT)) return this.prBase;
+    try {
+      const probe = JSON.parse(
+        execFileSync(STATE_SCRIPT, ["json", this.config.ticket], {
+          cwd: this.config.worktree,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }),
+      ) as { base?: string };
+      if (probe.base) this.prBase = probe.base;
+    } catch {
+      this.record(`could not read the PR base; ${DEFAULT_BASE} is the base`);
+    }
+    this.record(`PR base: origin/${this.prBase}`);
+    return this.prBase;
+  }
+
   private resolvePath(candidate: string): string {
     if (path.isAbsolute(candidate)) return candidate;
     const inPack = path.join(this.config.contextPack, candidate);
@@ -594,7 +615,7 @@ export class Orchestrator {
       case "verify":
         return `Verify the change in the live application. Report each broken flow with report, for_role "builder", and include what you saw. Write ${pack}/06-verification.md. For each acceptance criterion that passes, write a recording script and ${pack}/verify/flows/flows.json as your prompt describes, and list them in the handoff produced and counts.flows. ${common}`;
       case "review":
-        return reviewTaskFor({ size: this.size, ticket, base: BASE_BRANCH, pack });
+        return reviewTaskFor({ size: this.size, ticket, base: this.baseBranch(), pack });
       default:
         return `Run phase ${phase} as ${PHASE_ROLE[phase]}. ${common}`;
     }
@@ -1074,7 +1095,7 @@ export class Orchestrator {
         worktree: this.config.worktree,
         pack: this.config.contextPack,
         ticket: this.config.ticket,
-        base: BASE_BRANCH,
+        base: this.baseBranch(),
         scope: this.config.testScope,
         depth: this.testDepth(),
         mode: this.testMode(),
