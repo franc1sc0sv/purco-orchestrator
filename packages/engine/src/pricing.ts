@@ -11,6 +11,7 @@ export type Price = {
 export const PRICES_PER_MILLION: Record<string, Price> = {
   [MODELS.sonnet]: { input: 2, output: 10, cacheWrite: 4, cacheRead: 0.2 },
   [MODELS.opus]: { input: 4, output: 20, cacheWrite: 8, cacheRead: 0.2 },
+  [MODELS.haiku]: { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 },
 };
 
 export const priceFor = (model: string): Price | undefined => {

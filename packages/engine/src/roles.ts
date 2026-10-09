@@ -272,7 +272,7 @@ export const ROLE_SPECS: Record<RoleName, RoleSpec> = {
   },
   "defect-skeptic": {
     role: "defect-skeptic",
-    model: MODELS.opus,
+    model: MODELS.sonnet,
     phase: "test",
     description:
       "Attacks one confirmed defect: builds the strongest case that it is not a defect, and overturns the verdict when that case holds.",

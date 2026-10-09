@@ -1378,7 +1378,7 @@ export class Orchestrator {
       ...(canRerun ? (["rerun"] as const) : []),
       "stop",
     ];
-    const mechanical = step.phase === "test" && forBuilder.length === 0;
+    const mechanical = (step.phase === "test" || step.phase === "verify") && forBuilder.length === 0;
     let decision: LeadDecision = mechanical
       ? { decision: "defer", text: outcome.summary }
       : await this.leadDecide({
