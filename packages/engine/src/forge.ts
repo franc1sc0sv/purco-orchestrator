@@ -721,7 +721,14 @@ const inspect = async (ctx: Ctx, files: readonly string[], label: string): Promi
     const content = read(file);
     const known = new Set(protectedTestsOf(ctx.baseline, file));
     const fresh = testNames(content).filter((name) => !known.has(name));
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) {
+      await verdictRecordBatch({
+        cwd: ctx.cwd,
+        runId: ctx.runId,
+        verdicts: verdictsFor(file, rules.map((rule) => ({ rule, verdict: "not-applicable" as const, sites: [] }))),
+      });
+      return;
+    }
     await ctx.host.spawn({
       role: "inspector",
       name: `${label}:${path.basename(file)}`,
