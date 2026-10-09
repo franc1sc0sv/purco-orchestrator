@@ -18,14 +18,13 @@ import { eventsOfWorker, nowDoing, shortTarget, toolLabel } from "@/lib/agent-ac
 import { STEP_TONE, TONES, WORKER_LABEL, WORKER_TONE, isWorkerBusy, type Tone } from "@/lib/colors";
 import { formatCost, formatDuration, formatTokens, shortModel } from "@/lib/format";
 import {
-  STAGES,
   STAGE_LABELS,
   type ForgeJob,
   type PipelineStage,
-  type Stage,
   type StreamEvent,
   type Worker,
 } from "@/lib/types";
+import { flowItems, phasesOf, type FlowItem } from "@/lib/flow";
 import { cn } from "@/lib/utils";
 
 type LeadData = { tone: Tone; busy: boolean };
@@ -39,21 +38,23 @@ type JobData = {
   elapsedMs: number;
   progress: string | undefined;
   selected: boolean;
+  count: number;
 };
 
+type PhaseData = { label: string; detail: string; tone: Tone; busy: boolean };
+
+type PhaseNode = Node<PhaseData, "phase">;
 type LeadNode = Node<LeadData, "lead">;
 type JobNode = Node<JobData, "job">;
 type StageNode = Node<StageData, "stage">;
 type WorkerNode = Node<WorkerData, "worker">;
 
 const ROW_HEIGHT = 136;
+const PHASE_HEADER = 64;
 const STAGE_X = 220;
-const WORKER_X = 520;
-const WORKER_COLUMN_WIDTH = 240;
-const WORKER_COLUMNS = 2;
-
-const rowsOf = (count: number): number => Math.max(1, Math.ceil(count / WORKER_COLUMNS));
-const MAX_ENDED_PER_STAGE = 5;
+const PHASE_X = 440;
+const COLUMN_WIDTH = 260;
+const EMPTY_STAGE_HEIGHT = 96;
 
 const hidden = { opacity: 0, pointerEvents: "none" } as const;
 
@@ -156,7 +157,10 @@ const JobView = ({ data }: NodeProps<JobNode>) => {
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate font-semibold">{job.label}</span>
+        <span className="truncate font-semibold">
+          {job.label}
+          {data.count > 1 ? ` ×${data.count}` : ""}
+        </span>
         <Badge variant="secondary" className="font-mono">
           {job.kind}
         </Badge>
@@ -189,18 +193,22 @@ const Refit = () => {
   return null;
 };
 
-const nodeTypes = { lead: LeadView, stage: StageView, worker: WorkerView, job: JobView };
+const PhaseView = ({ data }: NodeProps<PhaseNode>) => (
+  <div
+    className={cn(
+      "w-52 rounded-full border-2 px-3 py-1.5 text-center",
+      TONES[data.tone].vars,
+      TONES[data.tone].node,
+      data.busy && "animate-node-glow",
+    )}
+  >
+    <div className="truncate text-xs font-semibold capitalize">{data.label}</div>
+    <div className="text-muted-foreground truncate font-mono text-[10px]">{data.detail}</div>
+    <Anchors />
+  </div>
+);
 
-const stageOf = (worker: Worker): Stage => worker.stage ?? "plan";
-
-const visibleWorkers = (workers: Worker[], liveIds: Set<string>): Worker[] => {
-  const live = workers.filter((worker) => liveIds.has(worker.id));
-  const ended = workers.filter((worker) => !liveIds.has(worker.id));
-  const keptEnded = STAGES.flatMap((stage) =>
-    ended.filter((worker) => stageOf(worker) === stage).slice(-MAX_ENDED_PER_STAGE),
-  );
-  return [...keptEnded, ...live];
-};
+const nodeTypes = { lead: LeadView, stage: StageView, worker: WorkerView, job: JobView, phase: PhaseView };
 
 const WAITING_DASH = "6 4";
 
@@ -219,6 +227,20 @@ const workerEdge = (worker: Worker, live: boolean, stuck: boolean): Pick<Edge, "
   };
 };
 
+const itemBusy = (item: FlowItem, liveIds: Set<string>, alive: boolean): boolean =>
+  item.kind === "worker"
+    ? liveIds.has(item.worker.id) && isWorkerBusy(item.worker.state)
+    : alive && item.job.state === "running";
+
+const itemEnd = (item: FlowItem, now: number): number =>
+  item.kind === "worker"
+    ? item.worker.endedAt
+      ? Date.parse(item.worker.endedAt)
+      : now
+    : item.job.endedAt
+      ? Date.parse(item.job.endedAt)
+      : now;
+
 const buildGraph = (
   workers: Worker[],
   liveIds: Set<string>,
@@ -231,19 +253,12 @@ const buildGraph = (
   const nodes: Node[] = [];
   const edges: Edge[] = [];
   const leadWorker = workers.find((worker) => worker.role === "lead" && liveIds.has(worker.id));
-  const shown = visibleWorkers(
-    workers.filter((worker) => worker.role !== "lead"),
-    liveIds,
-  );
-  const groups = pipeline.map((stage) => ({
-    stage,
-    own: shown.filter((worker) => stageOf(worker) === stage.stage),
-    jobs: stage.stage === "testing" ? forge.jobs : [],
-  }));
-  const totalHeight = groups.reduce(
-    (sum, group) => sum + rowsOf(group.own.length + group.jobs.length) * ROW_HEIGHT,
-    0,
-  );
+  const groups = pipeline.map((stage) => {
+    const phases = phasesOf(flowItems(stage.stage, workers, forge.jobs));
+    const deepest = Math.max(0, ...phases.map((phase) => phase.items.length));
+    return { stage, phases, height: deepest === 0 ? EMPTY_STAGE_HEIGHT : PHASE_HEADER + deepest * ROW_HEIGHT };
+  });
+  const totalHeight = groups.reduce((sum, group) => sum + group.height, 0);
 
   nodes.push({
     id: "lead",
@@ -257,93 +272,100 @@ const buildGraph = (
   } satisfies LeadNode);
 
   let cursor = 0;
-  for (const { stage, own, jobs } of groups) {
-    const groupHeight = rowsOf(own.length + jobs.length) * ROW_HEIGHT;
-    const busy = own.some((worker) => liveIds.has(worker.id) && isWorkerBusy(worker.state));
+  for (const { stage, phases, height } of groups) {
+    const stageBusy = alive && stage.status === "running";
     nodes.push({
       id: `stage:${stage.stage}`,
       type: "stage",
-      position: { x: STAGE_X, y: cursor + groupHeight / 2 - 28 },
-      data: {
-        label: STAGE_LABELS[stage.stage],
-        tone: STEP_TONE[stage.status],
-        busy: alive && stage.status === "running",
-      },
+      position: { x: STAGE_X, y: cursor + (phases.length > 0 ? PHASE_HEADER / 2 - 28 : height / 2 - 28) },
+      data: { label: STAGE_LABELS[stage.stage], tone: STEP_TONE[stage.status], busy: stageBusy },
       draggable: false,
     } satisfies StageNode);
     edges.push({
       id: `lead->${stage.stage}`,
       source: "lead",
       target: `stage:${stage.stage}`,
-      animated: busy && !stuck,
+      animated: stageBusy && !stuck,
       style: {
         stroke: TONES[STEP_TONE[stage.status]].color,
         strokeWidth: 2,
-        strokeDasharray:
-          stage.status === "waiting" ? WAITING_DASH : TONES[STEP_TONE[stage.status]].dash,
+        strokeDasharray: stage.status === "waiting" ? WAITING_DASH : TONES[STEP_TONE[stage.status]].dash,
       },
     });
-    own.forEach((worker, index) => {
-      const live = liveIds.has(worker.id);
+    phases.forEach((phase, column) => {
+      const x = PHASE_X + column * COLUMN_WIDTH;
+      const busy = phase.items.some((item) => itemBusy(item, liveIds, alive));
+      const end = Math.max(...phase.items.map((item) => itemEnd(item, forge.now)));
+      const phaseId = `phase:${stage.stage}:${column}`;
+      const tone: Tone = busy ? "running" : "done";
       nodes.push({
-        id: `worker:${worker.id}`,
-        type: "worker",
-        position: {
-          x: WORKER_X + (index % WORKER_COLUMNS) * WORKER_COLUMN_WIDTH,
-          y: cursor + Math.floor(index / WORKER_COLUMNS) * ROW_HEIGHT + 6,
-        },
+        id: phaseId,
+        type: "phase",
+        position: { x, y: cursor },
         data: {
-          worker,
-          busy: live && isWorkerBusy(worker.state),
-          ended: !live,
-          chip: view.chips.get(worker.id),
-          selected: view.selectedId === worker.id,
-        },
-        draggable: false,
-      } satisfies WorkerNode);
-      edges.push({
-        id: `${stage.stage}->${worker.id}`,
-        source: index % WORKER_COLUMNS === 0 ? `stage:${stage.stage}` : `worker:${own[index - 1]?.id}`,
-        target: `worker:${worker.id}`,
-        ...workerEdge(worker, live, stuck),
-      });
-    });
-    jobs.forEach((job, offset) => {
-      const index = own.length + offset;
-      const busy = alive && job.state === "running";
-      const tone: Tone = job.state === "running" && !alive ? "halted" : JOB_TONE[job.state];
-      const previous = index === 0 ? undefined : index <= own.length ? `worker:${own[index - 1]?.id}` : `job:${jobs[offset - 1]?.id}`;
-      nodes.push({
-        id: `job:${job.id}`,
-        type: "job",
-        position: {
-          x: WORKER_X + (index % WORKER_COLUMNS) * WORKER_COLUMN_WIDTH,
-          y: cursor + Math.floor(index / WORKER_COLUMNS) * ROW_HEIGHT + 6,
-        },
-        data: {
-          job,
+          label: phase.group,
+          detail: `${phase.items.length} item(s) · ${formatDuration(end - phase.start)}`,
           tone,
           busy,
-          elapsedMs: (job.endedAt ? Date.parse(job.endedAt) : forge.now) - Date.parse(job.startedAt),
-          progress: forge.progressOf(job),
-          selected: view.selectedId === `job:${job.id}`,
         },
         draggable: false,
-      } satisfies JobNode);
+      } satisfies PhaseNode);
       edges.push({
-        id: `${stage.stage}->job:${job.id}`,
-        source: index % WORKER_COLUMNS === 0 || previous === undefined ? `stage:${stage.stage}` : previous,
-        target: `job:${job.id}`,
+        id: `${column === 0 ? `stage:${stage.stage}` : `phase:${stage.stage}:${column - 1}`}->${phaseId}`,
+        source: column === 0 ? `stage:${stage.stage}` : `phase:${stage.stage}:${column - 1}`,
+        target: phaseId,
         animated: busy && !stuck,
-        style: {
-          stroke: TONES[tone].color,
-          strokeWidth: 2,
-          strokeDasharray: TONES[tone].dash,
-          opacity: busy ? 1 : 0.3,
-        },
+        style: { stroke: TONES[tone].color, strokeWidth: 2, opacity: busy ? 1 : 0.5 },
+      });
+      phase.items.forEach((item, row) => {
+        const y = cursor + PHASE_HEADER + row * ROW_HEIGHT;
+        if (item.kind === "worker") {
+          const { worker } = item;
+          const live = liveIds.has(worker.id);
+          nodes.push({
+            id: `worker:${worker.id}`,
+            type: "worker",
+            position: { x, y },
+            data: {
+              worker,
+              busy: live && isWorkerBusy(worker.state),
+              ended: !live,
+              chip: view.chips.get(worker.id),
+              selected: view.selectedId === worker.id,
+            },
+            draggable: false,
+          } satisfies WorkerNode);
+          edges.push({ id: `${phaseId}->${worker.id}`, source: phaseId, target: `worker:${worker.id}`, ...workerEdge(worker, live, stuck) });
+          return;
+        }
+        const { job } = item;
+        const jobBusy = alive && job.state === "running";
+        const jobTone: Tone = job.state === "running" && !alive ? "halted" : JOB_TONE[job.state];
+        nodes.push({
+          id: `job:${job.id}`,
+          type: "job",
+          position: { x, y },
+          data: {
+            job,
+            tone: jobTone,
+            busy: jobBusy,
+            elapsedMs: (job.endedAt ? Date.parse(job.endedAt) : forge.now) - Date.parse(job.startedAt),
+            progress: forge.progressOf(job),
+            selected: view.selectedId === `job:${job.id}`,
+            count: item.count,
+          },
+          draggable: false,
+        } satisfies JobNode);
+        edges.push({
+          id: `${phaseId}->job:${job.id}`,
+          source: phaseId,
+          target: `job:${job.id}`,
+          animated: jobBusy && !stuck,
+          style: { stroke: TONES[jobTone].color, strokeWidth: 2, strokeDasharray: TONES[jobTone].dash, opacity: jobBusy ? 1 : 0.3 },
+        });
       });
     });
-    cursor += groupHeight;
+    cursor += height;
   }
   return { nodes, edges, height: totalHeight };
 };
