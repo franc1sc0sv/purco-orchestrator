@@ -155,6 +155,9 @@ const readState = (absolute: string): { state: string; bytes?: Buffer } => {
 };
 
 const FORGE_WORK_PREFIX = ".test-forge/stryker-run/";
+const FORGE_REWRITTEN = /^\.test-forge\/stryker\/(?:vitest\.(?:backend|frontend)(?:\.solo)?\.config\.mts|phase-reporter\.mjs|message-ignorer\.mjs)$/;
+
+const forgeRewrites = (key: string): boolean => key.startsWith(FORGE_WORK_PREFIX) || FORGE_REWRITTEN.test(key);
 
 export const takeWriteSnapshot = (root: string): WriteSnapshot => {
   const gitDir = commonGitDir(root);
@@ -162,7 +165,7 @@ export const takeWriteSnapshot = (root: string): WriteSnapshot => {
   const contents = new Map<string, Buffer>();
   const keys = new Set(
     [...statusPaths(root), ...ignoredPaths(root), ...gitInternalPaths(gitDir)].filter(
-      (key) => !key.startsWith(FORGE_WORK_PREFIX),
+      (key) => !forgeRewrites(key),
     ),
   );
   for (const key of keys) {
