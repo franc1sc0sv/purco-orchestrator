@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { ActivityTimeline } from "@/components/activity-timeline";
+import { FlowView } from "@/components/flow-view";
 import { AgentPanel } from "@/components/agent-panel";
 import { AlertList } from "@/components/alert-list";
 import { AnswerNeeded } from "@/components/answer-needed";
@@ -49,7 +49,7 @@ export const LiveTab = ({
   const selected = detail.workers.find((worker) => worker.id === agentId);
   const selectedJob = detail.tests.jobs.find((job) => `job:${job.id}` === agentId);
   const alive = summary.activeRun !== null;
-  const [view, setView] = useState<"timeline" | "diagram">("timeline");
+  const [view, setView] = useState<"flow" | "diagram">("flow");
   const select = (id: string) => {
     window.location.hash = ticketHref(ticketId, "live", { ...keep, agent: id });
   };
@@ -81,7 +81,7 @@ export const LiveTab = ({
           title="Agents"
           action={
             <div className="flex gap-1">
-              {(["timeline", "diagram"] as const).map((option) => (
+              {(["flow", "diagram"] as const).map((option) => (
                 <button
                   key={option}
                   type="button"
@@ -97,8 +97,8 @@ export const LiveTab = ({
             </div>
           }
         >
-          {view === "timeline" ? (
-            <ActivityTimeline
+          {view === "flow" ? (
+            <FlowView
               workers={detail.workers}
               liveWorkerIds={detail.liveWorkerIds}
               jobs={detail.tests.jobs}
