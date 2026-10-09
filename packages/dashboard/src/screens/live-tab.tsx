@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
+import { ActivityTimeline } from "@/components/activity-timeline";
 import { AgentPanel } from "@/components/agent-panel";
 import { AlertList } from "@/components/alert-list";
 import { AnswerNeeded } from "@/components/answer-needed";
@@ -48,6 +49,11 @@ export const LiveTab = ({
   const selected = detail.workers.find((worker) => worker.id === agentId);
   const selectedJob = detail.tests.jobs.find((job) => `job:${job.id}` === agentId);
   const alive = summary.activeRun !== null;
+  const [view, setView] = useState<"timeline" | "diagram">("timeline");
+  const select = (id: string) => {
+    window.location.hash = ticketHref(ticketId, "live", { ...keep, agent: id });
+  };
+  const selectedKey = selected?.id ?? (selectedJob ? `job:${selectedJob.id}` : undefined);
   const ticketId = summary.ticket;
   const replayAt = replay === null ? null : replayTimeOf(new URLSearchParams({ t: replay }));
   const keep: Record<string, string> = replay === null ? {} : { t: replay };
@@ -71,24 +77,55 @@ export const LiveTab = ({
       </Card>
       {isTesting(detail.pipeline) ? <ForgeActivity tests={detail.tests} now={clockNow} /> : null}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(380px,34%)] gap-3">
-        <Panel title="Agents">
-          <Suspense fallback={<PanelSkeleton />}>
-            <AgentDiagram
+        <Panel
+          title="Agents"
+          action={
+            <div className="flex gap-1">
+              {(["timeline", "diagram"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setView(option)}
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-xs font-semibold capitalize",
+                    view === option ? "bg-blue-1 text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          {view === "timeline" ? (
+            <ActivityTimeline
               workers={detail.workers}
               liveWorkerIds={detail.liveWorkerIds}
-              pipeline={detail.pipeline}
-              alive={summary.activeRun !== null}
-              stuck={summary.state === "stuck"}
-              events={detail.events}
               jobs={detail.tests.jobs}
-              progressOf={(job) => jobProgress(job, detail.tests, alive)}
+              pipeline={detail.pipeline}
+              alive={alive}
               now={clockNow}
-              selectedId={selected?.id ?? (selectedJob ? `job:${selectedJob.id}` : undefined)}
-              onSelect={(workerId) => {
-                window.location.hash = ticketHref(ticketId, "live", { ...keep, agent: workerId });
-              }}
+              selectedId={selectedKey}
+              progressOf={(job) => jobProgress(job, detail.tests, alive)}
+              onSelect={select}
             />
-          </Suspense>
+          ) : (
+            <Suspense fallback={<PanelSkeleton />}>
+              <AgentDiagram
+                workers={detail.workers}
+                liveWorkerIds={detail.liveWorkerIds}
+                pipeline={detail.pipeline}
+                alive={alive}
+                stuck={summary.state === "stuck"}
+                events={detail.events}
+                jobs={detail.tests.jobs}
+                progressOf={(job) => jobProgress(job, detail.tests, alive)}
+                now={clockNow}
+                selectedId={selectedKey}
+                onSelect={select}
+              />
+            </Suspense>
+          )}
         </Panel>
         {selectedJob ? (
           <JobPanel
