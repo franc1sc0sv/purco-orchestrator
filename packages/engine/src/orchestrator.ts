@@ -1404,6 +1404,11 @@ export class Orchestrator {
       this.stop(`stopped after ${key}: ${decision.text}`);
       return;
     }
+    if (decision.decision === "continue" && outcome.status !== "done") {
+      this.store?.acceptStep(key, decision.text);
+      outcome.status = "done";
+      this.record(`${key} accepted: ${decision.text.slice(0, 200)}`);
+    }
     if (decision.decision === "retry") {
       const again: Step = { ...step, attempt: this.nextAttempt(step) };
       queue.unshift(again);

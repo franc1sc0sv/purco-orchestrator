@@ -675,6 +675,16 @@ export class Store {
       );
   }
 
+  acceptStep(key: string, reason: string): void {
+    if (!stageOfKey(key)) return;
+    this.db
+      .prepare(
+        `update steps set status = 'done', reason = ?, before_wait = null
+          where ticket = ? and step = ? and status = 'failed'`,
+      )
+      .run(`accepted: ${reason}`.slice(0, 300), this.ticketName(), key);
+  }
+
   haltStep(key: string, reason: string): void {
     if (!stageOfKey(key)) return;
     this.db
@@ -866,12 +876,12 @@ export class Store {
             "update runs set status = 'dead', ended_at = ? where run_id = ? and status = 'running'",
           )
           .run(at, held.runId);
-        this.db
-          .prepare(
-            "update steps set status = 'halted', reason = 'the run that owned this step stopped' where run_id = ? and status = 'running'",
-          )
-          .run(held.runId);
       }
+      this.db
+        .prepare(
+          "update steps set status = 'halted', reason = 'the engine process that ran this step stopped' where ticket = ? and status = 'running'",
+        )
+        .run(ticket);
       this.expireOrphanQuestions(at);
       this.db
         .prepare(
